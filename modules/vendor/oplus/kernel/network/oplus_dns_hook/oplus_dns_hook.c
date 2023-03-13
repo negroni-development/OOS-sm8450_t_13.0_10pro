@@ -5,11 +5,9 @@
 **
 ** Version: 1.0
 ** Date : 2021/8/13
-** Author: ShiQianhua
 **
 ** ------------------ Revision History:------------------------
 ** <author> <data> <version > <desc>
-** shiqianhua 2021/8/13 1.0 build this module
 ****************************************************************/
 #include <linux/bitops.h>
 #include <linux/err.h>
@@ -162,6 +160,8 @@ static int parse_querys(char *start, int *querys_len, query_info_t *queryList, u
     int offset = 0;
     int i = 0;
     int j = 0;
+	int notify_flag = 0;
+	char notify_url[MAX_URL_LEN + 1] = {0};
 
     spin_lock(&s_dns_hook_lock);
     for (i = 0; i < query_size; i++) {
@@ -202,7 +202,8 @@ static int parse_querys(char *start, int *querys_len, query_info_t *queryList, u
                     queryList += 1;
                     matchSize++;
 					if (s_first_notify == 0) {
-						send_first_dns_event(tmpurl);
+						notify_flag = 1;
+						strncpy(notify_url, tmpurl, MAX_URL_LEN);
 						s_first_notify = 1;
 					}
                 }
@@ -211,6 +212,10 @@ static int parse_querys(char *start, int *querys_len, query_info_t *queryList, u
         offset += urlLen + 2 + 4;
     }
     spin_unlock(&s_dns_hook_lock);
+
+	if (notify_flag) {
+		send_first_dns_event(notify_url);
+	}
 
     *match_count = matchSize;
     *querys_len = offset;

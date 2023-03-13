@@ -73,6 +73,9 @@
 #define DYNAMIC_POOL_REFILL_DEFER_WINDOW_MS 10
 #define DYNAMIC_POOL_KTHREAD_NICE_VAL 10
 
+atomic64_t qcom_system_heap_total = ATOMIC64_INIT(0);
+EXPORT_SYMBOL(qcom_system_heap_total);
+
 static int get_dynamic_pool_fillmark(struct dynamic_page_pool *pool)
 {
 	return DYNAMIC_POOL_FILL_MARK / (PAGE_SIZE << pool->order);
@@ -228,6 +231,11 @@ static void system_heap_free(struct qcom_sg_buffer *buffer)
 		      PAGE_ALIGN(buffer->len) / PAGE_SIZE);
 }
 
+inline bool is_system_heap_deferred_free(void (*free)(struct qcom_sg_buffer *buffer))
+{
+	return free == system_heap_free;
+}
+
 struct page *qcom_sys_heap_alloc_largest_available(struct dynamic_page_pool **pools,
 						   unsigned long size,
 						   unsigned int max_order)
@@ -236,17 +244,19 @@ struct page *qcom_sys_heap_alloc_largest_available(struct dynamic_page_pool **po
 	int i;
 
 	for (i = 0; i < NUM_ORDERS; i++) {
+		unsigned long flags;
+
 		if (size <  (PAGE_SIZE << orders[i]))
 			continue;
 		if (max_order < orders[i])
 			continue;
 
-		mutex_lock(&pools[i]->mutex);
+		spin_lock_irqsave(&pools[i]->lock, flags);
 		if (pools[i]->high_count)
 			page = dynamic_page_pool_remove(pools[i], true);
 		else if (pools[i]->low_count)
 			page = dynamic_page_pool_remove(pools[i], false);
-		mutex_unlock(&pools[i]->mutex);
+		spin_unlock_irqrestore(&pools[i]->lock, flags);
 
 		if (!page)
 			page = alloc_pages(pools[i]->gfp_mask, pools[i]->order);
@@ -360,6 +370,7 @@ static struct dma_buf *system_heap_allocate(struct dma_heap *heap,
 		goto vmperm_release;
 	}
 
+	atomic64_add(dmabuf->size, &qcom_system_heap_total);
 	return dmabuf;
 
 vmperm_release:

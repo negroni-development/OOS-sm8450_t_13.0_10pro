@@ -94,7 +94,6 @@ static int oplus_check_execveat_perm(struct file* filp)
 	if (!strncmp(absolute_path, "/data/local/tmp", 15)) {
 		goto out_free;
 	}
-	//add end
 	if (!uid_eq(current_uid(), GLOBAL_ROOT_UID)) {
 #ifdef CONFIG_OPLUS_EXECVE_REPORT
 		oplus_report_execveat(absolute_path, "execve_report");

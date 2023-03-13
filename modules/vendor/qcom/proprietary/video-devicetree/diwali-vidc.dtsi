@@ -12,12 +12,15 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
+		/* LLCC Cache */
+		cache-slice-names = "vidsc0";
+
 		/* Supply */
 		iris-ctl-supply = <&video_cc_mvs0c_gdsc>;
 		vcodec-supply = <&video_cc_mvs0_gdsc>;
 
 		/* Clocks */
-		clock-names = "gcc_video_axi0",
+		clock-names = "video_ctl_axi0_clk",
 			"core_clk", "vcodec_clk", "video_cc_mvs0_clk_src";
 		clock-ids = <GCC_VIDEO_AXI0_CLK VIDEO_CC_MVS0C_CLK
 			VIDEO_CC_MVS0_CLK VIDEO_CC_MVS0_CLK_SRC>;
@@ -25,12 +28,12 @@
 			<&videocc VIDEO_CC_MVS0C_CLK>,
 			<&videocc VIDEO_CC_MVS0_CLK>,
 			<&videocc VIDEO_CC_MVS0_CLK_SRC>;
-		qcom,proxy-clock-names = "gcc_video_axi0",
+		qcom,proxy-clock-names = "video_ctl_axi0_clk",
 			"core_clk", "vcodec_clk", "video_cc_mvs0_clk_src";
 		/* Mask: Bit0: Clock Scaling, Bit1: Mem Retention*/
 		qcom,clock-configs = <0x0 0x0 0x0 0x1>;
 		qcom,allowed-clock-rates = <240000000 338000000
-			364800000 444000000>;
+			366000000 444000000>;
 		resets = <&gcc GCC_VIDEO_AXI0_CLK_ARES>;
 		reset-names = "video_axi_reset";
 
@@ -40,16 +43,17 @@
 		vidc,firmware-name = "vpu20_4v";
 
 		/* Bus Interconnects */
-		interconnect-names = "venus-cnoc", "venus-ddr";
+		interconnect-names = "venus-cnoc", "venus-ddr", "venus-llcc";
 		interconnects = <&gem_noc MASTER_APPSS_PROC
 					&config_noc SLAVE_VENUS_CFG>,
+				<&mc_virt MASTER_LLCC
+					&mc_virt SLAVE_EBI1>,
 				<&mmss_noc MASTER_VIDEO_P0
-					&mc_virt SLAVE_EBI1>;
-
+					&gem_noc SLAVE_LLCC>;
 		/* Bus BW range (low, high) for each bus */
 		qcom,bus-range-kbps = <1000 1000
+					1000 15000000
 					1000 15000000>;
-
 		/* MMUs */
 		non_secure_cb {
 			compatible = "qcom,msm-vidc,context-bank";

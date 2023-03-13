@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -254,6 +255,7 @@ static QDF_STATUS pmo_configure_wow_sta(struct wlan_objmgr_vdev *vdev)
 	uint8_t mac_mask[QDF_MAC_ADDR_SIZE];
 	QDF_STATUS ret = QDF_STATUS_SUCCESS;
 	struct pmo_vdev_priv_obj *vdev_ctx;
+	struct qdf_mac_addr *mld_addr;
 
 	vdev_ctx = pmo_vdev_get_priv(vdev);
 
@@ -271,6 +273,21 @@ static QDF_STATUS pmo_configure_wow_sta(struct wlan_objmgr_vdev *vdev)
 	if (ret != QDF_STATUS_SUCCESS) {
 		pmo_err("Failed to add WOW unicast pattern ret %d", ret);
 		return ret;
+	}
+
+	mld_addr = (struct qdf_mac_addr *)wlan_vdev_mlme_get_mldaddr(vdev);
+	if (!qdf_is_macaddr_zero(mld_addr)) {
+		ret = pmo_tgt_send_wow_patterns_to_fw(
+			vdev,
+			pmo_get_and_increment_wow_default_ptrn(vdev_ctx),
+			(uint8_t *)mld_addr,
+			QDF_MAC_ADDR_SIZE, 0, mac_mask,
+			QDF_MAC_ADDR_SIZE, false);
+		if (QDF_IS_STATUS_ERROR(ret)) {
+			pmo_err("Failed to add WOW MLD unicast pattern ret %d",
+				ret);
+			return ret;
+		}
 	}
 
 	ret = pmo_configure_ssdp(vdev);
@@ -370,18 +387,14 @@ void pmo_register_wow_default_patterns(struct wlan_objmgr_vdev *vdev)
 }
 
 #ifdef CONFIG_LITHIUM
-#define ADDBA_REQ 0
-static void set_action_id_drop_pattern_for_block_ack(
-					uint32_t *action_category_map,
-					uint32_t *action_id_per_category)
+static void
+set_action_id_drop_pattern_for_block_ack(uint32_t *action_category_map)
 {
 	action_category_map[0] |= 1 << PMO_MAC_ACTION_BLKACK;
-	action_id_per_category[0] = 1 << ADDBA_REQ;
 }
 #else
-static inline void set_action_id_drop_pattern_for_block_ack(
-					uint32_t *action_category_map,
-					uint32_t *action_id_per_category)
+static inline void
+set_action_id_drop_pattern_for_block_ack(uint32_t *action_category_map)
 {
 }
 #endif
@@ -446,8 +459,7 @@ pmo_register_action_frame_patterns(struct wlan_objmgr_vdev *vdev,
 
 	set_action_id_drop_pattern_for_spec_mgmt(cmd->action_per_category);
 	set_action_id_drop_pattern_for_public_action(cmd->action_per_category);
-	set_action_id_drop_pattern_for_block_ack(&cmd->action_category_map[0],
-						 cmd->action_per_category);
+	set_action_id_drop_pattern_for_block_ack(&cmd->action_category_map[0]);
 
 	for (i = 0; i < PMO_SUPPORTED_ACTION_CATE_ELE_LIST; i++) {
 		if (i < ALLOWED_ACTION_FRAME_MAP_WORDS)

@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2015-2021 The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
@@ -80,7 +81,6 @@ enum sde_crtc_idle_pc_state {
  * CACHE_STATE_DISABLED: sys cache has been disabled
  * CACHE_STATE_ENABLED: sys cache has been enabled
  * CACHE_STATE_NORMAL: sys cache is normal state
- * CACHE_STATE_PRE_CACHE: frame cache is being prepared
  * CACHE_STATE_FRAME_WRITE: sys cache is being written to
  * CACHE_STATE_FRAME_READ: sys cache is being read
  */
@@ -88,7 +88,6 @@ enum sde_crtc_cache_state {
 	CACHE_STATE_DISABLED,
 	CACHE_STATE_ENABLED,
 	CACHE_STATE_NORMAL,
-	CACHE_STATE_PRE_CACHE,
 	CACHE_STATE_FRAME_WRITE,
 	CACHE_STATE_FRAME_READ
 };
@@ -304,7 +303,6 @@ struct sde_frame_data {
  * @misr_reconfigure : boolean entry indicates misr reconfigure status
  * @misr_frame_count  : misr frame count provided by client
  * @misr_data     : store misr data before turning off the clocks.
- * @idle_notify_work: delayed worker to notify idle timeout to user space
  * @power_event   : registered power event handle
  * @cur_perf      : current performance committed to clock/bandwidth driver
  * @plane_mask_old: keeps track of the planes used in the previous commit
@@ -319,6 +317,7 @@ struct sde_frame_data {
  * @ltm_buffer_lock : muttx to protect ltm_buffers allcation and free
  * @ltm_lock        : Spinlock to protect ltm buffer_cnt, hist_en and ltm lists
  * @needs_hw_reset  : Initiate a hw ctl reset
+ * @reinit_crtc_mixers : Reinitialize mixers in crtc
  * @hist_irq_idx    : hist interrupt irq idx
  * @disable_pending_cp : flag tracks pending color processing features force disable
  * @src_bpp         : source bpp used to calculate compression ratio
@@ -394,7 +393,6 @@ struct sde_crtc {
 	bool misr_enable_debugfs;
 	bool misr_reconfigure;
 	u32 misr_frame_count;
-	struct kthread_delayed_work idle_notify_work;
 
 	struct sde_power_event *power_event;
 
@@ -419,6 +417,7 @@ struct sde_crtc {
 	struct mutex ltm_buffer_lock;
 	spinlock_t ltm_lock;
 	bool needs_hw_reset;
+	bool reinit_crtc_mixers;
 	int hist_irq_idx;
 	bool disable_pending_cp;
 
@@ -448,16 +447,6 @@ enum sde_crtc_dirty_flags {
 	SDE_CRTC_DIRTY_MAX,
 };
 
-#ifdef OPLUS_BUG_STABILITY
-/* Move the struct plane_state to sde_crtc.h */
-struct plane_state {
-       struct sde_plane_state *sde_pstate;
-       const struct drm_plane_state *drm_pstate;
-       int stage;
-       u32 pipe_id;
-};
-#endif
-
 #define to_sde_crtc(x) container_of(x, struct sde_crtc, base)
 
 /**
@@ -467,6 +456,7 @@ struct plane_state {
  * @num_connectors: Number of associated drm connectors
  * @rsc_client    : sde rsc client when mode is valid
  * @is_ppsplit    : Whether current topology requires PPSplit special handling
+ * @in_fsc_mode   : Whether current state is in fsc mode
  * @bw_control    : true if bw/clk controlled by core bw/clk properties
  * @bw_split_vote : true if bw controlled by llcc/dram bw properties
  * @crtc_roi      : Current CRTC ROI. Possibly sub-rectangle of mode.
@@ -507,6 +497,7 @@ struct sde_crtc_state {
 	bool bw_split_vote;
 
 	bool is_ppsplit;
+	bool in_fsc_mode;
 	struct sde_rect crtc_roi;
 	struct sde_rect lm_bounds[MAX_MIXERS_PER_CRTC];
 	struct sde_rect lm_roi[MAX_MIXERS_PER_CRTC];
@@ -534,13 +525,6 @@ struct sde_crtc_state {
 	struct sde_cp_crtc_range_prop_payload
 		cp_range_payload[SDE_CP_CRTC_MAX_FEATURES];
 	bool cont_splash_populated;
-#ifdef OPLUS_BUG_STABILITY
-	bool fingerprint_mode;
-	bool fingerprint_pressed;
-	bool fingerprint_defer_sync;
-	struct sde_hw_dim_layer *fingerprint_dim_layer;
-	bool aod_skip_pcc;
-#endif
 };
 
 enum sde_crtc_irq_state {
@@ -597,7 +581,8 @@ static inline int sde_crtc_get_mixer_width(struct sde_crtc *sde_crtc,
 	if (cstate->num_ds_enabled)
 		mixer_width = cstate->ds_cfg[0].lm_width;
 	else
-		mixer_width = mode->hdisplay / sde_crtc->num_mixers;
+		mixer_width = GET_MODE_WIDTH(cstate->in_fsc_mode, mode) /
+				sde_crtc->num_mixers;
 
 	return mixer_width;
 }
@@ -613,8 +598,8 @@ static inline int sde_crtc_get_mixer_height(struct sde_crtc *sde_crtc,
 	if (!sde_crtc || !cstate || !mode)
 		return 0;
 
-	return (cstate->num_ds_enabled ?
-			cstate->ds_cfg[0].lm_height : mode->vdisplay);
+	return (cstate->num_ds_enabled ? cstate->ds_cfg[0].lm_height :
+			GET_MODE_HEIGHT(cstate->in_fsc_mode, mode));
 }
 
 /**
@@ -1010,10 +995,6 @@ void sde_crtc_misr_setup(struct drm_crtc *crtc, bool enable, u32 frame_count);
 void sde_crtc_get_misr_info(struct drm_crtc *crtc,
 		struct sde_crtc_misr_info *crtc_misr_info);
 
-#ifdef OPLUS_BUG_STABILITY
-struct sde_kms *_sde_crtc_get_kms_(struct drm_crtc *crtc);
-#endif
-
 /**
  * sde_crtc_set_bpp - set src and target bpp values
  * @sde_crtc: Pointer to sde crtc struct
@@ -1084,5 +1065,10 @@ void sde_crtc_cancel_delayed_work(struct drm_crtc *crtc);
  * @cstate:      Pointer to DRM crtc object
  */
 struct drm_encoder *sde_crtc_get_src_encoder_of_clone(struct drm_crtc *crtc);
+
+/*
+ * _sde_crtc_vm_release_notify- send event to usermode on vm release
+ */
+void _sde_crtc_vm_release_notify(struct drm_crtc *crtc);
 
 #endif /* _SDE_CRTC_H_ */

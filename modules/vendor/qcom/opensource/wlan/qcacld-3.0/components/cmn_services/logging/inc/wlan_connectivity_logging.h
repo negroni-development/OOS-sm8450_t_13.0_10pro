@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -23,9 +24,8 @@
 #ifndef _WLAN_CONNECTIVITY_LOGGING_H_
 #define _WLAN_CONNECTIVITY_LOGGING_H_
 
-#include <wlan_cm_api.h>
-#include "wlan_cm_roam_api.h"
 #include "wlan_logging_sock_svc.h"
+#include "wlan_cm_roam_public_struct.h"
 
 #define WLAN_MAX_LOGGING_FREQ 90
 
@@ -145,7 +145,7 @@ struct wlan_roam_candidate_info {
 struct wlan_roam_scan_info {
 	uint8_t cand_ap_count;
 	uint16_t num_scanned_freq;
-	qdf_freq_t scan_freq[WLAN_MAX_LOGGING_FREQ];
+	qdf_freq_t scan_freq[NUM_CHANNELS];
 };
 
 /**
@@ -183,10 +183,12 @@ struct wlan_roam_trigger_info {
 
 /**
  * struct wlan_btm_cand_info  - BTM candidate information
+ * @index: Candidate index
  * @preference: Candidate preference
  * @bssid: candidate bssid
  */
 struct wlan_btm_cand_info {
+	uint8_t idx;
 	uint8_t preference;
 	struct qdf_mac_addr bssid;
 };
@@ -219,9 +221,9 @@ struct wlan_roam_btm_info {
 	uint8_t btm_status_code;
 	uint8_t btm_delay;
 	bool is_disassoc_imminent;
-	uint16_t token;
-	uint32_t validity_timer;
-	uint32_t disassoc_timer;
+	uint8_t token;
+	uint8_t validity_timer;
+	uint16_t disassoc_timer;
 	uint32_t wtc_duration;
 	struct qdf_mac_addr target_bssid;
 };
@@ -297,13 +299,14 @@ struct wlan_connect_info {
 #define WLAN_MAX_LOG_RECORDS 45
 #define WLAN_MAX_LOG_LEN     256
 #define WLAN_RECORDS_PER_SEC 20
-#define MAX_RECORD_IN_SINGLE_EVT 7
+#define MAX_RECORD_IN_SINGLE_EVT 5
 
 /**
  * struct wlan_log_record  - Structure for indvidual records in the ring
  * buffer
  * @timestamp_us: Timestamp(time of the day) in microseconds
  * @fw_timestamp_us: timestamp at which roam scan was triggered
+ * @ktime_us: kernel timestamp (time of the day) in microseconds
  * @vdev_id: VDEV id
  * @log_subtype: Tag of the log
  * @bssid: AP bssid
@@ -320,6 +323,7 @@ struct wlan_connect_info {
 struct wlan_log_record {
 	uint64_t timestamp_us;
 	uint64_t fw_timestamp_us;
+	uint64_t ktime_us;
 	uint8_t vdev_id;
 	uint32_t log_subtype;
 	struct qdf_mac_addr bssid;
@@ -351,6 +355,7 @@ struct wlan_cl_osif_cbks {
 /**
  * struct wlan_connectivity_log_buf_data  - Master structure to hold the
  * pointers to the ring buffers.
+ * @psoc: Global psoc pointer
  * @osif_cbks: OSIF callbacks
  * @osif_cb_context: Pointer to the context to be passed to OSIF
  * callback
@@ -367,6 +372,7 @@ struct wlan_cl_osif_cbks {
  * @is_active: If the global buffer is initialized or not
  */
 struct wlan_connectivity_log_buf_data {
+	struct wlan_objmgr_psoc *psoc;
 	struct wlan_cl_osif_cbks osif_cbks;
 	void *osif_cb_context;
 	uint64_t first_record_timestamp_in_last_sec;
@@ -393,16 +399,68 @@ struct wlan_connectivity_log_buf_data {
 #define logging_err(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_QDF, ## params)
 #define logging_info(params...) QDF_TRACE_INFO(QDF_MODULE_ID_QDF, ## params)
 
+#if defined(WLAN_FEATURE_CONNECTIVITY_LOGGING) && \
+		defined(WLAN_FEATURE_ROAM_OFFLOAD)
+/**
+ * wlan_print_cached_sae_auth_logs() - Enqueue SAE authentication frame logs
+ * @bssid:  BSSID
+ * @vdev_id: Vdev id
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS wlan_print_cached_sae_auth_logs(struct qdf_mac_addr *bssid,
+					   uint8_t vdev_id);
+
+/**
+ * wlan_is_log_record_present_for_bssid() - Check if there is existing log
+ * record for the given bssid
+ * @bssid: BSSID
+ * @vdev_id: vdev id
+ *
+ * Return: true if record is present else false
+ */
+bool wlan_is_log_record_present_for_bssid(struct qdf_mac_addr *bssid,
+					  uint8_t vdev_id);
+
+/**
+ * wlan_clear_sae_auth_logs_cache() - Clear the cached auth related logs
+ * @vdev_id: vdev id
+ *
+ * Return: None
+ */
+void wlan_clear_sae_auth_logs_cache(uint8_t vdev_id);
+#else
+static inline
+QDF_STATUS wlan_print_cached_sae_auth_logs(struct qdf_mac_addr *bssid,
+					   uint8_t vdev_id)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline
+bool wlan_is_log_record_present_for_bssid(struct qdf_mac_addr *bssid,
+					  uint8_t vdev_id)
+{
+	return false;
+}
+
+static inline
+void wlan_clear_sae_auth_logs_cache(uint8_t vdev_id)
+{}
+#endif
+
 #ifdef WLAN_FEATURE_CONNECTIVITY_LOGGING
 /**
  * wlan_connectivity_logging_start()  - Initialize the connectivity/roaming
  * logging buffer
+ * @psoc: Global psoc pointer
  * @osif_cbks: OSIF callbacks
  * @osif_cbk_context: OSIF callback context argument
  *
  * Return: None
  */
-void wlan_connectivity_logging_start(struct wlan_cl_osif_cbks *osif_cbks,
+void wlan_connectivity_logging_start(struct wlan_objmgr_psoc *psoc,
+				     struct wlan_cl_osif_cbks *osif_cbks,
 				     void *osif_cb_context);
 
 /**
@@ -458,7 +516,8 @@ wlan_connectivity_mgmt_event(struct wlan_frame_hdr *mac_hdr,
 			     enum wlan_main_tag tag);
 #else
 static inline
-void wlan_connectivity_logging_start(struct wlan_cl_osif_cbks *osif_cbks,
+void wlan_connectivity_logging_start(struct wlan_objmgr_psoc *psoc,
+				     struct wlan_cl_osif_cbks *osif_cbks,
 				     void *osif_cb_context)
 {}
 

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #ifndef __KGSL_IOMMU_H
 #define __KGSL_IOMMU_H
@@ -13,7 +14,8 @@
  */
 #define KGSL_IOMMU_GLOBAL_MEM_SIZE	(20 * SZ_1M)
 #define KGSL_IOMMU_GLOBAL_MEM_BASE32	0xf8000000
-#define KGSL_IOMMU_GLOBAL_MEM_BASE64	0xfc000000
+#define KGSL_IOMMU_GLOBAL_MEM_BASE64	\
+	(KGSL_MEMSTORE_TOKEN_ADDRESS - KGSL_IOMMU_GLOBAL_MEM_SIZE)
 
 /*
  * This is a dummy token address that we use to identify memstore when the user
@@ -23,7 +25,7 @@
  * conflict
  */
 
-#define KGSL_MEMSTORE_TOKEN_ADDRESS 0xfff00000
+#define KGSL_MEMSTORE_TOKEN_ADDRESS	(KGSL_IOMMU_SECURE_BASE32 - SZ_4K)
 
 #define KGSL_IOMMU_GLOBAL_MEM_BASE(__mmu)	\
 	(test_bit(KGSL_MMU_64BIT, &(__mmu)->features) ? \
@@ -36,27 +38,27 @@
  * Limit secure size to 256MB for 32bit kernels.
  */
 #define KGSL_IOMMU_SECURE_SIZE32 SZ_256M
-#define KGSL_IOMMU_SECURE_END32(_mmu) KGSL_IOMMU_GLOBAL_MEM_BASE(_mmu)
-#define KGSL_IOMMU_SECURE_BASE32(_mmu)	\
-	(KGSL_IOMMU_GLOBAL_MEM_BASE(_mmu) - KGSL_IOMMU_SECURE_SIZE32)
+#define KGSL_IOMMU_SECURE_BASE32	\
+	(KGSL_IOMMU_SECURE_BASE64 - KGSL_IOMMU_SECURE_SIZE32)
+#define KGSL_IOMMU_SECURE_END32 KGSL_IOMMU_SECURE_BASE64
 
-/*
- * Try to use maximum allowed secure size i.e 0xFFFFF000
- * for both 32bit and 64bit secure apps when using 64bit kernel.
- */
-#define KGSL_IOMMU_SECURE_BASE64	0x0100000000ULL
-#define KGSL_IOMMU_SECURE_END64		0x01FFFFF000ULL
-#define KGSL_IOMMU_SECURE_SIZE64 \
-	(KGSL_IOMMU_SECURE_END64 - KGSL_IOMMU_SECURE_BASE64)
+#define KGSL_IOMMU_SECURE_BASE64	0x100000000ULL
+#define KGSL_IOMMU_SECURE_END64	\
+	(KGSL_IOMMU_SECURE_BASE64 + KGSL_IOMMU_SECURE_SIZE64)
+
+#define KGSL_IOMMU_MAX_SECURE_SIZE 0xFFFFF000
+
+#define KGSL_IOMMU_SECURE_SIZE64	\
+	(KGSL_IOMMU_MAX_SECURE_SIZE - KGSL_IOMMU_SECURE_SIZE32)
 
 #define KGSL_IOMMU_SECURE_BASE(_mmu) (test_bit(KGSL_MMU_64BIT, \
 			&(_mmu)->features) ? KGSL_IOMMU_SECURE_BASE64 : \
-			KGSL_IOMMU_SECURE_BASE32(_mmu))
+			KGSL_IOMMU_SECURE_BASE32)
 #define KGSL_IOMMU_SECURE_END(_mmu) (test_bit(KGSL_MMU_64BIT, \
 			&(_mmu)->features) ? KGSL_IOMMU_SECURE_END64 : \
-			KGSL_IOMMU_SECURE_END32(_mmu))
+			KGSL_IOMMU_SECURE_END32)
 #define KGSL_IOMMU_SECURE_SIZE(_mmu) (test_bit(KGSL_MMU_64BIT, \
-			&(_mmu)->features) ? KGSL_IOMMU_SECURE_SIZE64 : \
+			&(_mmu)->features) ? KGSL_IOMMU_MAX_SECURE_SIZE : \
 			KGSL_IOMMU_SECURE_SIZE32)
 
 /* The CPU supports 39 bit addresses */
@@ -166,15 +168,16 @@ struct kgsl_iommu {
 
 /*
  * struct kgsl_iommu_pt - Iommu pagetable structure private to kgsl driver
- * @domain: Pointer to the iommu domain that contains the iommu pagetable
+ * @base: Container of the base kgsl pagetable
  * @ttbr0: register value to set when using this pagetable
+ * @ pgtbl_ops: Pagetable operations for mapping/unmapping buffers
+ * @info: Pagetable info used to allocate pagetable operations
  */
 struct kgsl_iommu_pt {
 	struct kgsl_pagetable base;
 	u64 ttbr0;
-
 	struct io_pgtable_ops *pgtbl_ops;
-	struct io_pgtable_cfg cfg;
+	struct qcom_io_pgtable_info info;
 };
 
 #endif

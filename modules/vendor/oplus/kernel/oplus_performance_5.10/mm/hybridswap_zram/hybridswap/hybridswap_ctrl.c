@@ -287,6 +287,22 @@ out:
 	return err;
 }
 
+void hybridswap_unbind(struct zram *zram)
+{
+	struct block_device *bdev;
+
+	if (!zram->backing_dev)
+		return;
+
+	bdev = zram->bdev;
+	blkdev_put(bdev, FMODE_READ|FMODE_WRITE|FMODE_EXCL);
+	filp_close(zram->backing_dev, NULL);
+	zram->backing_dev = NULL;
+	zram->bdev = NULL;
+	zram->nr_pages = 0;
+	memset(loop_device, 0, DEVICE_NAME_LEN);
+}
+
 static inline unsigned long get_original_used_swap(void)
 {
 	struct sysinfo val;
@@ -474,7 +490,7 @@ ssize_t hybridswap_core_enable_show(struct device *dev,
 	return len;
 }
 
-ssize_t hybridswap_loop_device_store(struct device *dev,
+ssize_t backing_dev_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len)
 {
 	struct zram *zram;
@@ -505,7 +521,7 @@ out:
 	return len;
 }
 
-ssize_t hybridswap_loop_device_show(struct device *dev,
+ssize_t backing_dev_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	int len = 0;
@@ -513,6 +529,17 @@ ssize_t hybridswap_loop_device_show(struct device *dev,
 	len = sprintf(buf, "%s\n", loop_device);
 
 	return len;
+}
+
+ssize_t hybridswap_loop_device_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t len)
+{
+	return backing_dev_store(dev, attr, buf, len);
+}
+ssize_t hybridswap_loop_device_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return backing_dev_show(dev, attr, buf);
 }
 
 ssize_t hybridswap_dev_life_store(struct device *dev,

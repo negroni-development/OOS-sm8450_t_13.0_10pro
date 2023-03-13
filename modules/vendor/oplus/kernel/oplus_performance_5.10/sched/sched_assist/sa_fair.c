@@ -10,6 +10,9 @@
 #include <kernel/sched/sched.h>
 #include <linux/list.h>
 #include <include/linux/sched.h>
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
+#include <../kernel/oplus_perf_sched/frame_boost/frame_group.h>
+#endif
 
 #include <trace_sched_assist.h>
 
@@ -54,26 +57,21 @@ static inline int get_task_cls_for_scene(struct task_struct *task)
 		return 0;
 
 	/* for 2 clusters cpu, mid = max */
-	if (cls_mid == 0) {
+	if (cls_mid == 0)
 		cls_mid = cls_max;
-	}
 
 	/* for launch scene, heavy ux task should not move to min capacity cluster */
-	if (sched_assist_scene(SA_LAUNCH) && test_sched_assist_ux_type(task, SA_TYPE_HEAVY | SA_TYPE_ANIMATOR)) {
+	if (sched_assist_scene(SA_LAUNCH) && test_sched_assist_ux_type(task, SA_TYPE_HEAVY | SA_TYPE_ANIMATOR))
 		return test_sched_assist_ux_type(task, SA_TYPE_ANIMATOR) ? cls_mid : cls_max;
-	}
 
-	if (sched_assist_scene(SA_ANIM) && test_sched_assist_ux_type(task, SA_TYPE_ANIMATOR)) {
+	if (sched_assist_scene(SA_ANIM) && test_sched_assist_ux_type(task, SA_TYPE_ANIMATOR))
 		return is_task_util_over(task, BOOST_THRESHOLD_UNIT) ? cls_mid : 0;
-	}
 
-	if (sched_assist_scene(SA_LAUNCHER_SI)) {
+	if (sched_assist_scene(SA_LAUNCHER_SI))
 		return is_task_util_over(task, BOOST_THRESHOLD_UNIT) ? cls_mid : 0;
-	}
 
-	if (oplus_get_im_flag(task) == IM_FLAG_CAMERA_HAL) {
+	if (oplus_get_im_flag(task) == IM_FLAG_CAMERA_HAL)
 		return cls_mid;
-	}
 
 	return 0;
 }
@@ -89,7 +87,6 @@ static inline bool is_ux_task_prefer_cpu_for_scene(struct task_struct *task, uns
 
 	cls_id = get_task_cls_for_scene(task);
 	return arch_scale_cpu_capacity(cpu) >= ux_cputopo.sched_cls[cls_id].capacity;
-	//return capacity_orig_of(cpu) >= ux_cputopo.sched_cls[cls_id].capacity;
 }
 
 static inline bool skip_rt_and_ux(struct task_struct *p)
@@ -123,9 +120,8 @@ bool should_ux_task_skip_cpu(struct task_struct *task, unsigned int dst_cpu)
 		/* camera hal thread only skip rt, because they are too much,
 		 * if they skip each other, maybe easily jump to super big core. :(
 		 */
-		if (oplus_get_im_flag(task) == IM_FLAG_CAMERA_HAL) {
+		if (oplus_get_im_flag(task) == IM_FLAG_CAMERA_HAL)
 			return false;
-		}
 
 		orq = (struct oplus_rq *) cpu_rq(dst_cpu)->android_oem_data1;
 		if (!list_empty(&orq->ux_list)) {
@@ -137,9 +133,9 @@ bool should_ux_task_skip_cpu(struct task_struct *task, unsigned int dst_cpu)
 	return false;
 
 skip:
-	if (unlikely(global_debug_enabled & DEBUG_FTRACE)) {
+	if (unlikely(global_debug_enabled & DEBUG_FTRACE))
 		trace_printk("ux task=%-12s pid=%d skip_cpu=%d reason=%d\n", task->comm, task->pid, dst_cpu, reason);
-	}
+
 	return true;
 }
 EXPORT_SYMBOL(should_ux_task_skip_cpu);
@@ -150,7 +146,8 @@ static inline bool strict_ux_task(struct task_struct *task)
 		&& (task->tgid == save_top_app_tgid);
 }
 
-bool set_ux_task_to_prefer_cpu(struct task_struct *task, int *orig_target_cpu) {
+bool set_ux_task_to_prefer_cpu(struct task_struct *task, int *orig_target_cpu)
+{
 	struct rq *rq = NULL;
 	struct oplus_rq *orq = NULL;
 	struct ux_sched_cputopo ux_cputopo = ux_sched_cputopo;
@@ -159,6 +156,7 @@ bool set_ux_task_to_prefer_cpu(struct task_struct *task, int *orig_target_cpu) {
 	int cpu = 0;
 	int direction = -1;
 	int strict_cpu = -1;
+	bool invalid_target = false;
 
 	if (unlikely(!global_sched_assist_enabled))
 		return false;
@@ -170,9 +168,9 @@ bool set_ux_task_to_prefer_cpu(struct task_struct *task, int *orig_target_cpu) {
 		return false;
 
 	if (*orig_target_cpu < 0 || *orig_target_cpu >= OPLUS_NR_CPUS)
-		*orig_target_cpu = task->wake_cpu;
+		invalid_target = true;
 
-	if (!sched_assist_scene(SA_LAUNCH) && is_ux_task_prefer_cpu_for_scene(task, *orig_target_cpu))
+	if (!invalid_target && !sched_assist_scene(SA_LAUNCH) && is_ux_task_prefer_cpu_for_scene(task, *orig_target_cpu))
 		return false;
 
 	start_cls = cls_nr = get_task_cls_for_scene(task);
@@ -183,9 +181,8 @@ retry:
 		rq = cpu_rq(cpu);
 		orq = (struct oplus_rq *) rq->android_oem_data1;
 
-		if (strict_ux_task(task) && cpu_online(cpu) && cpu_active(cpu) && cpumask_test_cpu(cpu, task->cpus_ptr)) {
+		if (strict_ux_task(task) && cpu_online(cpu) && cpu_active(cpu) && cpumask_test_cpu(cpu, task->cpus_ptr))
 			strict_cpu = cpu;
-		}
 
 		if (!oplus_list_empty(&orq->ux_list))
 			continue;
@@ -229,9 +226,8 @@ void oplus_replace_next_task_fair(struct rq *rq, struct task_struct **p, struct 
 	if (unlikely(!global_sched_assist_enabled))
 		return;
 
-	if (oplus_list_empty(&orq->ux_list)) {
+	if (oplus_list_empty(&orq->ux_list))
 		return;
-	}
 
 	list_for_each_safe(pos, n, &orq->ux_list) {
 		struct oplus_task_struct *ots = list_entry(pos, struct oplus_task_struct, ux_entry);
@@ -270,9 +266,8 @@ inline void oplus_check_preempt_wakeup(struct rq *rq, struct task_struct *p, boo
 	wake_ux = test_task_ux(p);
 	curr_ux = test_task_ux(curr);
 
-	if (!wake_ux && !curr_ux) {
+	if (!wake_ux && !curr_ux)
 		return;
-	}
 
 	/* ux can preempt un-ux */
 	if (wake_ux && !curr_ux) {
@@ -286,9 +281,8 @@ inline void oplus_check_preempt_wakeup(struct rq *rq, struct task_struct *p, boo
 	}
 
 	/* both of wake_task and curr_task are ux */
-	if (prio_higher(oplus_get_ux_state(p), oplus_get_ux_state(curr))) {
+	if (prio_higher(oplus_get_ux_state(p), oplus_get_ux_state(curr)) && (oplus_get_im_flag(p) != IM_FLAG_CAMERA_HAL))
 		*preempt = true;
-	}
 
 update:
 	/* if curr is ux task, update it's runtime here */
@@ -317,14 +311,14 @@ void update_rq_nr_imbalance(int cpu)
 			cpumask_clear_cpu(i, &nr_mask);
 	}
 
-	if (!oplus_idle_cpu(cpu) && (total_nr >= threshold)) {
+	if (!oplus_idle_cpu(cpu) && (total_nr >= threshold))
 		cpumask_set_cpu(cpu, &nr_mask);
-	} else {
+	else
 		cpumask_clear_cpu(cpu, &nr_mask);
-	}
 }
 
-bool should_force_spread_tasks(void) {
+bool should_force_spread_tasks(void)
+{
 	return !cpumask_empty(&nr_mask);
 }
 EXPORT_SYMBOL(should_force_spread_tasks);
@@ -349,7 +343,7 @@ int task_lb_sched_type(struct task_struct *tsk)
 	else if (cgroup_type == SA_CGROUP_BACKGROUND)
 		return SA_BG;
 
-	return -1;
+	return SA_INVALID;
 }
 EXPORT_SYMBOL(task_lb_sched_type);
 
@@ -490,6 +484,11 @@ void android_rvh_can_migrate_task_handler(void *unused, struct task_struct *p, i
 {
 	if (should_ux_task_skip_cpu(p, dst_cpu))
 		*can_migrate = 0;
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
+	if (fbg_skip_migration(p, task_cpu(p), dst_cpu))
+		*can_migrate = 0;
+#endif
 }
 
 void task_tpd_mask(struct task_struct *tsk, cpumask_t *request)
@@ -523,7 +522,7 @@ void task_tpd_mask(struct task_struct *tsk, cpumask_t *request)
 
 	cpumask_copy(request, &mask);
 	oplus_show_cpus(request, buf);
-	ux_debug("task_tpd_mask: pid = %d: comm = %s, tpd = %d, related_cpus = %s\n", tsk->pid, tsk->comm, tpd, buf);
+	ux_debug("%s: pid = %d: comm = %s, tpd = %d, related_cpus = %s\n", __func__, tsk->pid, tsk->comm, tpd, buf);
 }
 EXPORT_SYMBOL(task_tpd_mask);
 

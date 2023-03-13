@@ -165,6 +165,7 @@
 &dsi_sim_vid {
 	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_sim>;
 	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_dcs";
+	qcom,platform-reset-gpio = <&tlmm 0 0>;
 };
 
 &dsi_sim_dsc_375_cmd {
@@ -186,6 +187,7 @@
 &dsi_dual_sim_vid {
 	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_sim>;
 	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_dcs";
+	qcom,platform-reset-gpio = <&tlmm 0 0>;
 };
 
 &dsi_sim_vdc_cmd {
@@ -196,6 +198,7 @@
 &dsi_sim_vdc_vid {
 	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_sim>;
 	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_dcs";
+	qcom,platform-reset-gpio = <&tlmm 0 0>;
 };
 
 &dsi_dual_sim_dsc_375_cmd {
@@ -235,11 +238,7 @@
 };
 
 &sde_dsi {
-    extvdd-supply = <&L1D>;
-    //#ifdef OPLUS_BUG_STABILITY
-    /* LiPing-M@PSW.MM.Display.LCD,2021-05-12 add for panel */
-    qcom,dsi-default-panel = <&dsi_panel_samsung_amb670yf07_1440_3216_dsc_cmd>;
-    //#endif
+	extvdd-supply = <&L1D>;
 };
 
 &qupv3_se4_i2c {
@@ -247,21 +246,23 @@
 		panel = <&dsi_panel_samsung_amb670yf07_1440_3216_dsc_cmd
 				&dsi_panel_samsung_amb670yf07_1440_3216_dsc_cmd_t0>;
 	};
+	synaptics21631@4B {
+		panel = <&dsi_oplus21631_samsung_1440_3216_dsc_cmd_t0>;
+	};
 };
 
 //#ifdef OPLUS_FEATURE_CHG_BASIC
-// lizhijie@OPLUS_FEATURE_CHG_BASIC, 2021/08/24, add for chg notify
 &battery_charger {
 	panel = <&dsi_panel_samsung_amb670yf07_1440_3216_dsc_cmd
-				&dsi_panel_samsung_amb670yf07_1440_3216_dsc_cmd_t0>;
+				&dsi_panel_samsung_amb670yf07_1440_3216_dsc_cmd_t0
+				&dsi_oplus21631_samsung_1440_3216_dsc_cmd_t0>;
 };
 //#endif
 
 &soc {
 	//#ifdef OPLUS_FEATURE_FINGERPRINT
-	//#len.nie@BSP.Fingerprint.Basic 2021/05/21 add for oplus fingerprint
 	goodix_fp {
-		panel = <&dsi_panel_samsung_amb670yf07_1440_3216_dsc_cmd &dsi_panel_samsung_amb670yf07_1440_3216_dsc_cmd_t0>;
+		panel = <&dsi_panel_samsung_amb670yf07_1440_3216_dsc_cmd &dsi_panel_samsung_amb670yf07_1440_3216_dsc_cmd_t0 &dsi_oplus21631_samsung_1440_3216_dsc_cmd_t0>;
 	};
 	//#endif /*OPLUS_FEATURE_FINGERPRINT*/
 };

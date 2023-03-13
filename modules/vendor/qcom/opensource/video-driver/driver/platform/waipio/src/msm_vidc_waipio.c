@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2020-2021,, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/of.h>
@@ -31,17 +32,6 @@
 #define MAX_SLICE_MB_SIZE         \
 	(((4096 + 15) >> 4) * ((2304 + 15) >> 4))
 
-#define UBWC_CONFIG(mc, ml, hbb, bs1, bs2, bs3, bsp) \
-{	\
-	.max_channels = mc,	\
-	.mal_length = ml,	\
-	.highest_bank_bit = hbb,	\
-	.bank_swzl_level = bs1,	\
-	.bank_swz2_level = bs2, \
-	.bank_swz3_level = bs3, \
-	.bank_spreading = bsp,	\
-}
-
 #define ENC     MSM_VIDC_ENCODER
 #define DEC     MSM_VIDC_DECODER
 #define H264    MSM_VIDC_H264
@@ -49,6 +39,7 @@
 #define VP9     MSM_VIDC_VP9
 #define HEIC    MSM_VIDC_HEIC
 #define CODECS_ALL     (H264 | HEVC | VP9 | HEIC)
+#define MAXIMUM_OVERRIDE_VP9_FPS 120
 
 static struct msm_platform_core_capability core_data_waipio[] = {
 	/* {type, value} */
@@ -56,8 +47,8 @@ static struct msm_platform_core_capability core_data_waipio[] = {
 	{DEC_CODECS, H264|HEVC|VP9|HEIC},
 	{MAX_SESSION_COUNT, 16},
 	{MAX_NUM_720P_SESSIONS, 16},
-	{MAX_NUM_1080P_SESSIONS, 8},
-	{MAX_NUM_4K_SESSIONS, 4},
+	{MAX_NUM_1080P_SESSIONS, 10},
+	{MAX_NUM_4K_SESSIONS, 5},
 	{MAX_NUM_8K_SESSIONS, 2},
 	{MAX_SECURE_SESSION_COUNT, 3},
 	{MAX_RT_MBPF, 173056},	/* (8192x4320)/256 + (4096x2176)/256*/
@@ -210,8 +201,8 @@ static struct msm_platform_inst_capability instance_data_waipio[] = {
 	{MBPS, ENC, CODECS_ALL, 64, 3916800, 1, 3916800},
 	/* ((1920 * 1088) / 256) * 960 fps */
 	{MBPS, DEC, CODECS_ALL, 64, 7833600, 1, 7833600},
-	/* ((4096 * 2304) / 256) * 60 */
-	{MBPS, DEC, VP9, 36, 2211840, 1, 2211840},
+	/* ((4096 * 2304) / 256) * 120 */
+	{MBPS, DEC, VP9, 36, 4423680, 1, 4423680},
 	/* ((4096 * 2304) / 256) * 60 fps */
 	{POWER_SAVE_MBPS, ENC, CODECS_ALL, 0, 2211840, 1, 2211840},
 
@@ -237,7 +228,7 @@ static struct msm_platform_inst_capability instance_data_waipio[] = {
 		1, (DEFAULT_FPS << 16)},
 
 	{OPERATING_RATE, DEC, VP9,
-		(MINIMUM_FPS << 16), (MAXIMUM_VP9_FPS << 16),
+		(MINIMUM_FPS << 16), (MAXIMUM_OVERRIDE_VP9_FPS << 16),
 		1, (DEFAULT_FPS << 16)},
 
 	{SCALE_FACTOR, ENC, H264|HEVC, 1, 8, 1, 8},
@@ -261,6 +252,11 @@ static struct msm_platform_inst_capability instance_data_waipio[] = {
 		{0},
 		{0},
 		NULL, msm_vidc_set_u32},
+
+	{TS_REORDER, DEC, H264|HEVC,
+		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
+		1, V4L2_MPEG_MSM_VIDC_DISABLE,
+		V4L2_CID_MPEG_VIDC_TS_REORDER},
 
 	{HFLIP, ENC, CODECS_ALL,
 		V4L2_MPEG_MSM_VIDC_DISABLE,
@@ -384,8 +380,8 @@ static struct msm_platform_inst_capability instance_data_waipio[] = {
 		{0},
 		{LTR_COUNT, IR_RANDOM, TIME_DELTA_BASED_RC, I_FRAME_QP,
 			P_FRAME_QP, B_FRAME_QP, ENH_LAYER_COUNT, BIT_RATE,
-			CONTENT_ADAPTIVE_CODING, BITRATE_BOOST, MIN_QUALITY,
-			VBV_DELAY, PEAK_BITRATE,SLICE_MODE, META_ROI_INFO,
+			META_ROI_INFO, MIN_QUALITY, BITRATE_BOOST, VBV_DELAY,
+			PEAK_BITRATE, SLICE_MODE, CONTENT_ADAPTIVE_CODING,
 			BLUR_TYPES, LOWLATENCY_MODE},
 		msm_vidc_adjust_bitrate_mode, msm_vidc_set_u32_enum},
 
@@ -402,10 +398,9 @@ static struct msm_platform_inst_capability instance_data_waipio[] = {
 		{0},
 		{LTR_COUNT, IR_RANDOM, TIME_DELTA_BASED_RC, I_FRAME_QP,
 			P_FRAME_QP, B_FRAME_QP, CONSTANT_QUALITY, ENH_LAYER_COUNT,
-			CONTENT_ADAPTIVE_CODING, BIT_RATE,
-			BITRATE_BOOST, MIN_QUALITY, VBV_DELAY,
-			PEAK_BITRATE, SLICE_MODE, META_ROI_INFO, BLUR_TYPES,
-			LOWLATENCY_MODE},
+			BIT_RATE, META_ROI_INFO, MIN_QUALITY, BITRATE_BOOST, VBV_DELAY,
+			PEAK_BITRATE, SLICE_MODE, CONTENT_ADAPTIVE_CODING,
+			BLUR_TYPES, LOWLATENCY_MODE},
 		msm_vidc_adjust_bitrate_mode, msm_vidc_set_u32_enum},
 
 	{LOSSLESS, ENC, HEVC,
@@ -523,7 +518,7 @@ static struct msm_platform_inst_capability instance_data_waipio[] = {
 		1, V4L2_MPEG_MSM_VIDC_DISABLE,
 		V4L2_CID_MPEG_VIDC_LOWLATENCY_REQUEST,
 		HFI_PROP_SEQ_CHANGE_AT_SYNC_FRAME,
-		CAP_FLAG_INPUT_PORT | CAP_FLAG_DYNAMIC_ALLOWED},
+		CAP_FLAG_INPUT_PORT},
 
 	{LTR_COUNT, ENC, H264|HEVC,
 		0, 2, 1, 0,
@@ -1650,26 +1645,6 @@ static struct msm_platform_inst_capability instance_data_waipio[] = {
 		HFI_PROP_MAX_NUM_REORDER_FRAMES},
 };
 
-/*
- * Custom conversion coefficients for resolution: 176x144 negative
- * coeffs are converted to s4.9 format
- * (e.g. -22 converted to ((1 << 13) - 22)
- * 3x3 transformation matrix coefficients in s4.9 fixed point format
- */
-static u32 vpe_csc_custom_matrix_coeff[MAX_MATRIX_COEFFS] = {
-	440, 8140, 8098, 0, 460, 52, 0, 34, 463
-};
-
-/* offset coefficients in s9 fixed point format */
-static u32 vpe_csc_custom_bias_coeff[MAX_BIAS_COEFFS] = {
-	53, 0, 4
-};
-
-/* clamping value for Y/U/V([min,max] for Y/U/V) */
-static u32 vpe_csc_custom_limit_coeff[MAX_LIMIT_COEFFS] = {
-	16, 235, 16, 240, 16, 240
-};
-
 /* Default UBWC config for LPDDR5 */
 static struct msm_vidc_ubwc_config_data ubwc_config_waipio[] = {
 	UBWC_CONFIG(8, 32, 16, 0, 1, 1, 1),
@@ -1691,6 +1666,7 @@ static struct msm_vidc_platform_data waipio_data = {
 	.csc_data.vpe_csc_custom_limit_coeff = vpe_csc_custom_limit_coeff,
 	.ubwc_config = ubwc_config_waipio,
 	.bus_bw_nrt = bus_bw_nrt,
+	.vpu_ver = VPU_VERSION_IRIS2,
 };
 
 static int msm_vidc_init_data(struct msm_vidc_core *core)

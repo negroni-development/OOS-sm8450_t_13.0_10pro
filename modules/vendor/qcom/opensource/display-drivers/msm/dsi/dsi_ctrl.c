@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -71,6 +72,7 @@ static const enum dsi_ctrl_version dsi_ctrl_v2_3 = DSI_CTRL_VERSION_2_3;
 static const enum dsi_ctrl_version dsi_ctrl_v2_4 = DSI_CTRL_VERSION_2_4;
 static const enum dsi_ctrl_version dsi_ctrl_v2_5 = DSI_CTRL_VERSION_2_5;
 static const enum dsi_ctrl_version dsi_ctrl_v2_6 = DSI_CTRL_VERSION_2_6;
+static const enum dsi_ctrl_version dsi_ctrl_v2_7 = DSI_CTRL_VERSION_2_7;
 
 static const struct of_device_id msm_dsi_of_match[] = {
 	{
@@ -92,6 +94,10 @@ static const struct of_device_id msm_dsi_of_match[] = {
 	{
 		.compatible = "qcom,dsi-ctrl-hw-v2.6",
 		.data = &dsi_ctrl_v2_6,
+	},
+	{
+		.compatible = "qcom,dsi-ctrl-hw-v2.7",
+		.data = &dsi_ctrl_v2_7,
 	},
 	{}
 };
@@ -448,6 +454,7 @@ static void dsi_ctrl_clear_dma_status(struct dsi_ctrl *dsi_ctrl)
 static void dsi_ctrl_post_cmd_transfer(struct dsi_ctrl *dsi_ctrl)
 {
 	int rc = 0;
+	struct dsi_ctrl_hw_ops dsi_hw_ops = dsi_ctrl->hw.ops;
 	struct dsi_clk_ctrl_info clk_info;
 	u32 mask = BIT(DSI_FIFO_OVERFLOW);
 
@@ -463,6 +470,10 @@ static void dsi_ctrl_post_cmd_transfer(struct dsi_ctrl *dsi_ctrl)
 		/* Wait for read command transfer to complete is done in dsi_message_rx. */
 		dsi_ctrl_dma_cmd_wait_for_done(dsi_ctrl);
 	}
+
+	if (dsi_ctrl->hw.reset_trig_ctrl)
+		dsi_hw_ops.reset_trig_ctrl(&dsi_ctrl->hw,
+				&dsi_ctrl->host_config.common_config);
 
 	/* Command engine disable, unmask overflow, remove vote on clocks and gdsc */
 	rc = dsi_ctrl_set_cmd_engine_state(dsi_ctrl, DSI_CTRL_ENGINE_OFF, false);
@@ -726,6 +737,7 @@ static int dsi_ctrl_init_regmap(struct platform_device *pdev,
 	case DSI_CTRL_VERSION_2_4:
 	case DSI_CTRL_VERSION_2_5:
 	case DSI_CTRL_VERSION_2_6:
+	case DSI_CTRL_VERSION_2_7:
 		ptr = msm_ioremap(pdev, "disp_cc_base", ctrl->name);
 		if (IS_ERR(ptr)) {
 			DSI_CTRL_ERR(ctrl, "disp_cc base address not found for\n");
@@ -1038,6 +1050,9 @@ int dsi_ctrl_pixel_format_to_bpp(enum dsi_pixel_format dst_format)
 	case DSI_PIXEL_FORMAT_RGB888:
 		bpp = 24;
 		break;
+	case DSI_PIXEL_FORMAT_RGB101010:
+		bpp = 30;
+		break;
 	default:
 		bpp = 24;
 		break;
@@ -1088,6 +1103,10 @@ static int dsi_ctrl_update_link_freqs(struct dsi_ctrl *dsi_ctrl,
 		}
 	} else if (config->panel_mode == DSI_OP_CMD_MODE) {
 		/* Calculate the bit rate needed to match dsi transfer time */
+		if (host_cfg->phy_type == DSI_PHY_TYPE_CPHY) {
+			min_dsi_clk_hz *= bits_per_symbol;
+			do_div(min_dsi_clk_hz, num_of_symbols);
+		}
 		bit_rate = min_dsi_clk_hz * frame_time_us;
 		do_div(bit_rate, dsi_transfer_time_us);
 		bit_rate = bit_rate * num_of_lanes;
@@ -1417,13 +1436,13 @@ static void dsi_kickoff_msg_tx(struct dsi_ctrl *dsi_ctrl,
 	SDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_ENTRY, flags,
 		msg->flags);
 
-	if (dsi_ctrl->hw.reset_trig_ctrl)
-		dsi_hw_ops.reset_trig_ctrl(&dsi_ctrl->hw,
-				&dsi_ctrl->host_config.common_config);
-
 	if (dsi_hw_ops.splitlink_cmd_setup && split_link->enabled)
 		dsi_hw_ops.splitlink_cmd_setup(&dsi_ctrl->hw,
 				&dsi_ctrl->host_config.common_config, flags);
+
+	if (dsi_hw_ops.init_cmddma_trig_ctrl)
+		dsi_hw_ops.init_cmddma_trig_ctrl(&dsi_ctrl->hw,
+				&dsi_ctrl->host_config.common_config);
 
 	/*
 	 * Always enable DMA scheduling for video mode panel.
@@ -2985,7 +3004,6 @@ static irqreturn_t dsi_ctrl_isr(int irq, void *ptr)
 static int _dsi_ctrl_setup_isr(struct dsi_ctrl *dsi_ctrl)
 {
 	int irq_num, rc;
-	uint32_t intr_idx;
 
 	if (!dsi_ctrl)
 		return -EINVAL;
@@ -2996,20 +3014,6 @@ static int _dsi_ctrl_setup_isr(struct dsi_ctrl *dsi_ctrl)
 	init_completion(&dsi_ctrl->irq_info.vid_frame_done);
 	init_completion(&dsi_ctrl->irq_info.cmd_frame_done);
 	init_completion(&dsi_ctrl->irq_info.bta_done);
-
-	/* If there is unbalanced refcount for any interrupt, irq_stat_mask
-	* remain non zero on suspend. Due to this, enable_irq does not get
-	* called on resume, leading to ctrl ISR permanently disabled.
-	* This is a defensive check to recover from such scenario.
-	*/
-	for (intr_idx = 0; intr_idx < DSI_STATUS_INTERRUPT_COUNT; intr_idx++) {
-		if (dsi_ctrl->irq_info.irq_stat_refcount[intr_idx]) {
-			DSI_CTRL_ERR(dsi_ctrl,
-				"refcount mismatch, intr_idx %d\n", intr_idx);
-			SDE_EVT32(intr_idx, dsi_ctrl->irq_info.irq_stat_mask,
-			dsi_ctrl->irq_info.irq_stat_refcount[intr_idx]);
-		}
-	}
 
 	irq_num = platform_get_irq(dsi_ctrl->pdev, 0);
 	if (irq_num < 0) {
@@ -3060,6 +3064,7 @@ void dsi_ctrl_enable_status_interrupt(struct dsi_ctrl *dsi_ctrl,
 	SDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_ENTRY, intr_idx,
 		dsi_ctrl->irq_info.irq_num, dsi_ctrl->irq_info.irq_stat_mask,
 		dsi_ctrl->irq_info.irq_stat_refcount[intr_idx]);
+
 	spin_lock_irqsave(&dsi_ctrl->irq_info.irq_lock, flags);
 
 	if (dsi_ctrl->irq_info.irq_stat_refcount[intr_idx] == 0) {
@@ -3095,6 +3100,7 @@ void dsi_ctrl_disable_status_interrupt(struct dsi_ctrl *dsi_ctrl,
 	SDE_EVT32_IRQ(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_ENTRY, intr_idx,
 		dsi_ctrl->irq_info.irq_num, dsi_ctrl->irq_info.irq_stat_mask,
 		dsi_ctrl->irq_info.irq_stat_refcount[intr_idx]);
+
 	spin_lock_irqsave(&dsi_ctrl->irq_info.irq_lock, flags);
 
 	if (dsi_ctrl->irq_info.irq_stat_refcount[intr_idx])
@@ -3119,6 +3125,8 @@ int dsi_ctrl_host_timing_update(struct dsi_ctrl *dsi_ctrl)
 		return -EINVAL;
 	}
 
+	mutex_lock(&dsi_ctrl->ctrl_lock);
+
 	if (dsi_ctrl->hw.ops.host_setup)
 		dsi_ctrl->hw.ops.host_setup(&dsi_ctrl->hw,
 				&dsi_ctrl->host_config.common_config);
@@ -3136,9 +3144,11 @@ int dsi_ctrl_host_timing_update(struct dsi_ctrl *dsi_ctrl)
 				0x0, NULL);
 	} else {
 		DSI_CTRL_ERR(dsi_ctrl, "invalid panel mode for resolution switch\n");
+		mutex_unlock(&dsi_ctrl->ctrl_lock);
 		return -EINVAL;
 	}
 
+	mutex_unlock(&dsi_ctrl->ctrl_lock);
 	return 0;
 }
 

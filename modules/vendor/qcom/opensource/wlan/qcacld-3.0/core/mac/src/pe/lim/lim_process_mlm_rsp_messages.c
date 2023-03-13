@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -244,9 +245,11 @@ void lim_process_mlm_start_cnf(struct mac_context *mac, uint32_t *msg_buf)
 					CHANNEL_STATE_DFS))
 				send_bcon_ind = true;
 		} else {
-			if (wlan_reg_get_channel_state_for_freq(mac->pdev,
-								chan_freq)
-					!= CHANNEL_STATE_DFS)
+			/* Indoor channels are also marked DFS, therefore
+			 * check if the channel has REGULATORY_CHAN_RADAR
+			 * channel flag to identify if the channel is DFS
+			 */
+			if (!wlan_reg_is_dfs_for_freq(mac->pdev, chan_freq))
 				send_bcon_ind = true;
 		}
 		if (WLAN_REG_IS_6GHZ_CHAN_FREQ(pe_session->curr_op_freq))
@@ -585,8 +588,12 @@ void lim_process_mlm_auth_cnf(struct mac_context *mac_ctx, uint32_t *msg)
 			 * password is used. Then AP will still reject the
 			 * authentication even correct password is used unless
 			 * STA send deauth to AP upon authentication failure.
+			 *
+			 * Do not send deauth mgmt frame when already in Deauth
+			 * state while joining.
 			 */
-			if (auth_type == eSIR_AUTH_TYPE_SAE) {
+			if (auth_type == eSIR_AUTH_TYPE_SAE &&
+			    auth_cnf->resultCode != eSIR_SME_DEAUTH_WHILE_JOIN) {
 				pe_debug("Send deauth for SAE auth failure");
 				lim_send_deauth_mgmt_frame(mac_ctx,
 						       auth_cnf->protStatusCode,
@@ -1261,6 +1268,7 @@ QDF_STATUS lim_sta_handle_connect_fail(join_params *param)
 	struct pe_session *session;
 	struct mac_context *mac_ctx;
 	tpDphHashNode sta_ds = NULL;
+	QDF_STATUS status;
 
 	if (!param) {
 		pe_err("param is NULL");
@@ -1310,37 +1318,14 @@ QDF_STATUS lim_sta_handle_connect_fail(join_params *param)
 	session->lim_join_req = NULL;
 
 error:
-	/*
-	 * Delete the session if JOIN failure occurred.
-	 * if the peer is not created, then there is no
-	 * need to send down the set link state which will
-	 * try to delete the peer. Instead a join response
-	 * failure should be sent to the upper layers.
-	 */
-	if (param->result_code != eSIR_SME_PEER_CREATE_FAILED) {
-		QDF_STATUS status;
+	session->prot_status_code = param->prot_status_code;
+	session->result_code = param->result_code;
 
-		session->prot_status_code = param->prot_status_code;
-		session->result_code = param->result_code;
+	status = wma_send_vdev_stop(session->smeSessionId);
+	if (QDF_IS_STATUS_ERROR(status))
+		lim_join_result_callback(mac_ctx, session->smeSessionId);
 
-		status = wma_send_vdev_stop(session->smeSessionId);
-		if (QDF_IS_STATUS_ERROR(status)) {
-			lim_join_result_callback(mac_ctx,
-						 session->smeSessionId);
-		}
-
-		return status;
-	}
-
-
-	lim_send_sme_join_reassoc_rsp(mac_ctx, eWNI_SME_JOIN_RSP,
-				      param->result_code,
-				      param->prot_status_code,
-				      session, session->smeSessionId);
-	if (param->result_code == eSIR_SME_PEER_CREATE_FAILED)
-		pe_delete_session(mac_ctx, session);
-
-	return QDF_STATUS_SUCCESS;
+	return status;
 }
 
 /**
@@ -2787,10 +2772,11 @@ static void lim_process_switch_channel_join_req(
 			pe_debug("MLO: Generate and process assoc rsp for link vdev");
 
 			if (QDF_IS_STATUS_SUCCESS(
-				util_gen_link_assoc_rsp(assoc_rsp.ptr,
-							assoc_rsp.len,
-							sta_link_addr,
-							link_assoc_rsp.ptr))) {
+				util_gen_link_assoc_rsp(
+					assoc_rsp.ptr, assoc_rsp.len - 24,
+					false, sta_link_addr,
+					link_assoc_rsp.ptr, assoc_rsp.len,
+					(qdf_size_t *)&link_assoc_rsp.len))) {
 				pe_debug("MLO: process assoc rsp for link vdev");
 				lim_process_assoc_rsp_frame(mac_ctx,
 							    link_assoc_rsp.ptr,

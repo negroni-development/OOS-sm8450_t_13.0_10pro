@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/slab.h>
@@ -374,6 +375,7 @@ static void cam_tfe_hw_mgr_stop_hw_res(
 				CAM_ISP_HW_CMD_STOP_BUS_ERR_IRQ,
 				&dummy_args, sizeof(dummy_args));
 		}
+		isp_hw_res->hw_res[i]->rdi_only_ctx = false;
 	}
 }
 
@@ -601,6 +603,9 @@ static int cam_tfe_mgr_csid_stop_hw(
 		stop.node_res = stop_res;
 		stop.stop_cmd = stop_cmd;
 		hw_intf->hw_ops.stop(hw_intf->hw_priv, &stop, sizeof(stop));
+
+		for (i = 0; i < cnt; i++)
+			stop_res[i]->rdi_only_ctx = false;
 	}
 
 	return 0;
@@ -4351,7 +4356,7 @@ static int cam_tfe_mgr_prepare_hw_update(void *hw_mgr_priv,
 	struct cam_isp_prepare_hw_update_data   *prepare_hw_data;
 	struct cam_isp_frame_header_info         frame_header_info;
 	struct cam_isp_change_base_args          change_base_info = {0};
-	struct cam_isp_check_sfe_fe_io_cfg       sfe_fe_chk_cfg = {0};
+	struct cam_isp_check_io_cfg_for_scratch  check_for_scratch = {0};
 
 	if (!hw_mgr_priv || !prepare_hw_update_args) {
 		CAM_ERR(CAM_ISP, "Invalid args");
@@ -4437,7 +4442,7 @@ static int cam_tfe_mgr_prepare_hw_update(void *hw_mgr_priv,
 			NULL, CAM_ISP_TFE_OUT_RES_BASE,
 			CAM_TFE_HW_OUT_RES_MAX, fill_fence,
 			CAM_ISP_HW_TYPE_TFE,
-			&frame_header_info, &sfe_fe_chk_cfg);
+			&frame_header_info, &check_for_scratch);
 
 		if (rc) {
 			CAM_ERR(CAM_ISP,
@@ -5309,6 +5314,65 @@ end:
 	return 0;
 }
 
+static int cam_tfe_hw_mgr_handle_hw_dump_info(
+	void                                 *ctx,
+	void                                 *evt_info)
+{
+	struct cam_tfe_hw_mgr_ctx     *tfe_hw_mgr_ctx =
+		(struct cam_tfe_hw_mgr_ctx *)ctx;
+	struct cam_isp_hw_event_info  *event_info =
+		(struct cam_isp_hw_event_info *)evt_info;
+	struct cam_isp_hw_mgr_res     *hw_mgr_res = NULL;
+	struct cam_hw_intf            *hw_intf;
+	uint32_t i, out_port_id;
+	uint64_t dummy_args;
+	int rc = 0;
+
+	list_for_each_entry(hw_mgr_res,
+		&tfe_hw_mgr_ctx->res_list_tfe_csid, list) {
+		for (i = 0; i < CAM_ISP_HW_SPLIT_MAX; i++) {
+			if (!hw_mgr_res->hw_res[i])
+				continue;
+			hw_intf = hw_mgr_res->hw_res[i]->hw_intf;
+			if (hw_intf->hw_ops.process_cmd) {
+				rc = hw_intf->hw_ops.process_cmd(
+					hw_intf->hw_priv,
+					CAM_ISP_HW_CMD_CSID_CLOCK_DUMP,
+					&dummy_args,
+					sizeof(uint64_t));
+				if (rc)
+					CAM_ERR(CAM_ISP,
+						"CSID Clock Dump failed");
+			}
+		}
+	}
+
+	if (event_info->res_type == CAM_ISP_RESOURCE_VFE_OUT) {
+		out_port_id = event_info->res_id & 0xFF;
+		if (out_port_id >= CAM_TFE_HW_OUT_RES_MAX) {
+			CAM_ERR(CAM_ISP,
+				"Resource out of range");
+			goto end;
+		}
+		hw_mgr_res =
+			&tfe_hw_mgr_ctx->res_list_tfe_out[out_port_id];
+		for (i = 0; i < CAM_ISP_HW_SPLIT_MAX; i++) {
+			if (!hw_mgr_res->hw_res[i])
+				continue;
+			hw_intf = hw_mgr_res->hw_res[i]->hw_intf;
+			if (hw_intf->hw_ops.process_cmd) {
+				rc = hw_intf->hw_ops.process_cmd(
+					hw_intf->hw_priv,
+					CAM_ISP_HW_CMD_DUMP_BUS_INFO,
+					(void *)event_info,
+					sizeof(struct cam_isp_hw_event_info));
+			}
+		}
+	}
+end:
+	return rc;
+}
+
 static int cam_tfe_hw_mgr_handle_csid_event(
 	uint32_t                      err_type,
 	struct cam_isp_hw_event_info *event_info)
@@ -5339,9 +5403,11 @@ static int cam_tfe_hw_mgr_handle_csid_event(
 }
 
 static int cam_tfe_hw_mgr_handle_hw_err(
+	void                                *ctx,
 	void                                *evt_info)
 {
 	struct cam_isp_hw_error_event_info      *err_evt_info;
+	struct cam_tfe_hw_mgr_ctx               *tfe_hw_mgr_ctx;
 	struct cam_isp_hw_event_info            *event_info = evt_info;
 	struct cam_isp_hw_error_event_data       error_event_data = {0};
 	struct cam_tfe_hw_event_recovery_data    recovery_data = {0};
@@ -5367,6 +5433,18 @@ static int cam_tfe_hw_mgr_handle_hw_err(
 		rc = cam_tfe_hw_mgr_handle_csid_event(err_evt_info->err_type, event_info);
 		spin_unlock(&g_tfe_hw_mgr.ctx_lock);
 		return rc;
+	}
+
+	if (ctx) {
+		tfe_hw_mgr_ctx =
+			(struct cam_tfe_hw_mgr_ctx *)ctx;
+		if (event_info->res_type ==
+			CAM_ISP_RESOURCE_TFE_IN &&
+			!tfe_hw_mgr_ctx->is_rdi_only_context &&
+			event_info->res_id !=
+			CAM_ISP_HW_TFE_IN_CAMIF)
+			cam_tfe_hw_mgr_handle_hw_dump_info(
+				tfe_hw_mgr_ctx, event_info);
 	}
 
 	core_idx = event_info->hw_idx;
@@ -5560,6 +5638,12 @@ static int cam_tfe_hw_mgr_handle_hw_eof(
 	case CAM_ISP_HW_TFE_IN_RDI0:
 	case CAM_ISP_HW_TFE_IN_RDI1:
 	case CAM_ISP_HW_TFE_IN_RDI2:
+		if (!tfe_hw_mgr_ctx->is_rdi_only_context)
+			break;
+		if (atomic_read(&tfe_hw_mgr_ctx->overflow_pending))
+			break;
+		tfe_hw_irq_eof_cb(tfe_hw_mgr_ctx->common.cb_priv,
+			CAM_ISP_HW_EVENT_EOF, (void *)&eof_done_event_data);
 		break;
 
 	default:
@@ -5642,7 +5726,7 @@ static int cam_tfe_hw_mgr_event_handler(
 		break;
 
 	case CAM_ISP_HW_EVENT_ERROR:
-		rc = cam_tfe_hw_mgr_handle_hw_err(evt_info);
+		rc = cam_tfe_hw_mgr_handle_hw_err(priv, evt_info);
 		break;
 
 	default:

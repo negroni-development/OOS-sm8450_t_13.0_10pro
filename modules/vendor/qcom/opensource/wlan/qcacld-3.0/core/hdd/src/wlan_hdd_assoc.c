@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -838,6 +839,9 @@ void hdd_copy_ht_operation(struct hdd_station_ctx *hdd_sta_ctx,
 		hdd_ht_ops->operation_mode |=
 			IEEE80211_HT_OP_MODE_NON_HT_STA_PRSNT;
 
+	if (ht_ops->chan_center_freq_seg2)
+		hdd_ht_ops->operation_mode |=
+			(ht_ops->chan_center_freq_seg2 << IEEE80211_HT_OP_MODE_CCFS2_SHIFT);
 	/* stbc_param */
 	temp_ht_ops = ht_ops->basicSTBCMCS &
 			HT_STBC_PARAM_MCS;
@@ -997,7 +1001,7 @@ void hdd_copy_he_operation(struct hdd_station_ctx *hdd_sta_ctx,
 
 bool hdd_is_roam_sync_in_progress(struct hdd_context *hdd_ctx, uint8_t vdev_id)
 {
-	return MLME_IS_ROAM_SYNCH_IN_PROGRESS(hdd_ctx->psoc, vdev_id);
+	return wlan_cm_is_roam_sync_in_progress(hdd_ctx->psoc, vdev_id);
 }
 
 void hdd_conn_remove_connect_info(struct hdd_station_ctx *sta_ctx)
@@ -1275,6 +1279,7 @@ QDF_STATUS hdd_roam_register_sta(struct hdd_adapter *adapter,
 
 	txrx_ops.tx.tx_comp = hdd_sta_notify_tx_comp_cb;
 	txrx_ops.tx.tx = NULL;
+	txrx_ops.get_tsf_time = hdd_get_tsf_time;
 	cdp_vdev_register(soc, adapter->vdev_id, (ol_osif_vdev_handle)adapter,
 			  &txrx_ops);
 	if (!txrx_ops.tx.tx) {
@@ -1564,10 +1569,27 @@ QDF_STATUS hdd_roam_register_tdlssta(struct hdd_adapter *adapter,
 		txrx_ops.rx.rx_stack = NULL;
 		txrx_ops.rx.rx_flush = NULL;
 	}
+	if (adapter->hdd_ctx->config->fisa_enable &&
+	    adapter->device_mode != QDF_MONITOR_MODE) {
+		hdd_debug("FISA feature enabled");
+		hdd_rx_register_fisa_ops(&txrx_ops);
+	}
+
+	txrx_ops.rx.stats_rx = hdd_tx_rx_collect_connectivity_stats_info;
+
+	txrx_ops.tx.tx_comp = hdd_sta_notify_tx_comp_cb;
+	txrx_ops.tx.tx = NULL;
+
 	cdp_vdev_register(soc, adapter->vdev_id, (ol_osif_vdev_handle)adapter,
 			  &txrx_ops);
+
+	if (!txrx_ops.tx.tx) {
+		hdd_err("vdev register fail");
+		return QDF_STATUS_E_FAILURE;
+	}
+
 	adapter->tx_fn = txrx_ops.tx.tx;
-	txrx_ops.rx.stats_rx = hdd_tx_rx_collect_connectivity_stats_info;
+
 
 	/* Register the Station with TL...  */
 	qdf_status = cdp_peer_register(soc, OL_TXRX_PDEV_ID, &txrx_desc);

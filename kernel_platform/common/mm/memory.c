@@ -3159,7 +3159,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 	 */
 	if (!pte_map_lock(vmf)) {
 		ret = VM_FAULT_RETRY;
-		goto out_free_new;
+		goto out_invalidate_end;
 	}
 	if (likely(pte_same(*vmf->pte, vmf->orig_pte))) {
 		if (old_page) {
@@ -3247,6 +3247,8 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		put_page(old_page);
 	}
 	return page_copied ? VM_FAULT_WRITE : 0;
+out_invalidate_end:
+	mmu_notifier_invalidate_range_only_end(&range);
 out_free_new:
 	put_page(new_page);
 out:
@@ -4715,8 +4717,19 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 		goto unlock;
 	}
 	if (vmf->flags & FAULT_FLAG_WRITE) {
-		if (!pte_write(entry))
-			return do_wp_page(vmf);
+		if (!pte_write(entry)) {
+			if (!(vmf->flags & FAULT_FLAG_SPECULATIVE))
+				return do_wp_page(vmf);
+
+			if (!mmu_notifier_trylock(vmf->vma->vm_mm)) {
+				ret = VM_FAULT_RETRY;
+				goto unlock;
+			}
+
+			ret = do_wp_page(vmf);
+			mmu_notifier_unlock(vmf->vma->vm_mm);
+			return ret;
+		}
 		entry = pte_mkdirty(entry);
 	}
 	entry = pte_mkyoung(entry);
@@ -5020,11 +5033,15 @@ static vm_fault_t ___handle_speculative_fault(struct mm_struct *mm,
 		goto out_walk;
 
 	p4d = p4d_offset(pgd, address);
+	if (pgd_val(READ_ONCE(*pgd)) != pgd_val(pgdval))
+		goto out_walk;
 	p4dval = READ_ONCE(*p4d);
 	if (p4d_none(p4dval) || unlikely(p4d_bad(p4dval)))
 		goto out_walk;
 
 	vmf.pud = pud_offset(p4d, address);
+	if (p4d_val(READ_ONCE(*p4d)) != p4d_val(p4dval))
+		goto out_walk;
 	pudval = READ_ONCE(*vmf.pud);
 	if (pud_none(pudval) || unlikely(pud_bad(pudval)))
 		goto out_walk;
@@ -5034,6 +5051,8 @@ static vm_fault_t ___handle_speculative_fault(struct mm_struct *mm,
 		goto out_walk;
 
 	vmf.pmd = pmd_offset(vmf.pud, address);
+	if (pud_val(READ_ONCE(*vmf.pud)) != pud_val(pudval))
+		goto out_walk;
 	vmf.orig_pmd = READ_ONCE(*vmf.pmd);
 	/*
 	 * pmd_none could mean that a hugepage collapse is in progress
@@ -5061,6 +5080,11 @@ static vm_fault_t ___handle_speculative_fault(struct mm_struct *mm,
 	 */
 
 	vmf.pte = pte_offset_map(vmf.pmd, address);
+	if (pmd_val(READ_ONCE(*vmf.pmd)) != pmd_val(vmf.orig_pmd)) {
+		pte_unmap(vmf.pte);
+		vmf.pte = NULL;
+		goto out_walk;
+	}
 	vmf.orig_pte = READ_ONCE(*vmf.pte);
 	barrier(); /* See comment in handle_pte_fault() */
 	if (pte_none(vmf.orig_pte)) {

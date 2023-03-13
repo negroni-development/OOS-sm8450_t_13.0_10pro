@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -198,7 +199,7 @@ static void dsi_pll_config_slave(struct dsi_pll_resource *rsc)
 	rsc->slave = NULL;
 
 	if (!orsc) {
-		DSI_PLL_WARN(rsc,
+		DSI_PLL_DBG(rsc,
 			"slave PLL unavilable, assuming standalone config\n");
 		return;
 	}
@@ -1556,7 +1557,8 @@ int dsi_pll_5nm_configure(void *pll, bool commit)
 	if (rsc->slave)
 		dsi_pll_enable_pll_bias(rsc->slave);
 
-	dsi_pll_init_val(rsc);
+	if (commit)
+		dsi_pll_init_val(rsc);
 
 	rc = dsi_pll_5nm_set_byteclk_div(rsc, commit);
 

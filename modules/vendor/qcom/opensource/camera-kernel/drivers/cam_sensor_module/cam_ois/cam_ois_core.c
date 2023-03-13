@@ -96,6 +96,7 @@ int ois_power_down_thread(void *arg)
 			o_ctrl->ois_download_fw_done = CAM_OIS_FW_NOT_DOWNLOAD;
 			o_ctrl->ois_fd_have_close_state = CAM_OIS_IS_CLOSE;
 			mutex_unlock(&(o_ctrl->do_ioctl_ois));
+			CAM_ERR(CAM_OIS, "ois type=%d,cam_ois_power_down,so reset state",o_ctrl->ois_type);
 		}
 #endif
 
@@ -180,6 +181,10 @@ static int cam_ois_get_dev_handle(struct cam_ois_ctrl_t *o_ctrl,
 
 	ois_acq_dev.device_handle =
 		cam_create_device_hdl(&bridge_params);
+	if (ois_acq_dev.device_handle <= 0) {
+		CAM_ERR(CAM_OIS, "Can not create device handle");
+		return -EFAULT;
+	}
 	o_ctrl->bridge_intf.device_hdl = ois_acq_dev.device_handle;
 	o_ctrl->bridge_intf.session_hdl = ois_acq_dev.session_handle;
 
@@ -865,7 +870,9 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 		}
 
 		trace_begin("%d_%d_%s Download FW", o_ctrl->cci_num, o_ctrl->cci_i2c_master, o_ctrl->ois_name);
+		CAM_ERR(CAM_OIS,"%d_%d_%s %s Download FW ", o_ctrl->cci_num, o_ctrl->cci_i2c_master, o_ctrl->ois_name,o_ctrl->ois_fw_flag?"start":"don't");
 		if (o_ctrl->ois_fw_flag) {
+			CAM_ERR(CAM_OIS, "read ois_name %s", o_ctrl->ois_name);
 			if (strstr(o_ctrl->ois_name, "lc898")) {
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
 				o_ctrl->ois_module_vendor = (o_ctrl->opcode.pheripheral & 0xFF00) >> 8;
@@ -889,6 +896,24 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 				}
 				else
 					rc = DownloadFW(o_ctrl);
+			} else if(strstr(o_ctrl->ois_name, "imx766_bu24721_tele")) {
+				if(o_ctrl->cam_ois_download_fw_in_advance)
+				{
+					//OIS for imx766_bu24721gwz
+					mutex_lock(&(o_ctrl->do_ioctl_ois));
+					if(o_ctrl->ois_download_fw_done == CAM_OIS_FW_NOT_DOWNLOAD){
+						rc = DownloadFW(o_ctrl);
+					}
+					else
+					{
+						CAM_INFO(CAM_OIS, "Tele OIS FW Have Download");
+					}
+					if(rc)
+						o_ctrl->ois_download_fw_done = CAM_OIS_FW_NOT_DOWNLOAD;
+					else
+						o_ctrl->ois_download_fw_done = CAM_OIS_FW_DOWNLOAD_DONE;
+					mutex_unlock(&(o_ctrl->do_ioctl_ois));
+				}
 #endif
 			} else {
 				rc = cam_ois_fw_download(o_ctrl);
@@ -1610,6 +1635,22 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 		}
 		break;
 	}
+	case CAM_FIRMWARE_CALI_GYRO_OFFSET: {
+		uint32_t gyro_offset = 0;
+		if(strstr(o_ctrl->ois_name, "bu24721")) {
+			DoBU24721GyroOffset(o_ctrl, &gyro_offset);
+		}
+		CAM_ERR(CAM_OIS, "[GyroOffsetCaliByFirmware] gyro_offset: 0x%x !!!", gyro_offset);
+		if (copy_to_user((void __user *) cmd->handle, &gyro_offset,
+			sizeof(gyro_offset))) {
+			CAM_ERR(CAM_OIS, "Failed Copy to User");
+			rc = -1;
+			goto release_mutex;
+		}
+
+		break;
+	}
+
 
 #endif
 

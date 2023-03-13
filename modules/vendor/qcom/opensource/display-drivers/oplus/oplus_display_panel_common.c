@@ -12,7 +12,6 @@
 #include "oplus_display_panel_common.h"
 #include "oplus_display_panel.h"
 #include "oplus_display_panel_seed.h"
-#include "oplus_onscreenfingerprint.h"
 #include <linux/notifier.h>
 #include <linux/msm_drm_notify.h>
 #include <linux/soc/qcom/panel_event_notifier.h>
@@ -118,11 +117,13 @@ int oplus_display_panel_get_oplus_max_brightness(void *buf)
 int oplus_display_panel_get_max_brightness(void *buf)
 {
 	uint32_t *max_brightness = buf;
+	int panel_id = (*max_brightness >> 12);
 	struct dsi_display *display = get_main_display();
-	struct dsi_panel *panel = display->panel;
+	if (panel_id == 1)
+		display = get_sec_display();
 
 	if (oplus_debug_max_brightness == 0) {
-		(*max_brightness) = panel->bl_config.bl_normal_max_level;
+		(*max_brightness) = display->panel->bl_config.bl_normal_max_level;
 	} else {
 		(*max_brightness) = oplus_debug_max_brightness;
 	}
@@ -158,9 +159,14 @@ int oplus_display_panel_get_brightness(void *buf)
 int oplus_display_panel_get_vendor(void *buf)
 {
 	struct panel_info *p_info = buf;
+	struct dsi_display *display = NULL;
 	char *vendor = NULL;
 	char *manu_name = NULL;
-	struct dsi_display *display = get_main_display();
+	int panel_id = p_info->version[0];
+
+	display = get_main_display();
+	if (1 == panel_id)
+		display = get_sec_display();
 
 	if (!display || !display->panel ||
 			!display->panel->oplus_priv.vendor_name ||
@@ -346,6 +352,7 @@ int oplus_display_panel_get_serial_number(void *buf)
 	uint64_t serial_number;
 	struct panel_serial_number *panel_rnum = buf;
 	struct dsi_display *display = get_main_display();
+	int panel_id = panel_rnum->serial_number[0];
 
 	if (!display || !display->panel) {
 		printk(KERN_INFO
@@ -353,7 +360,25 @@ int oplus_display_panel_get_serial_number(void *buf)
 		return -1;
 	}
 
-	if (get_oplus_display_power_status() != OPLUS_DISPLAY_POWER_ON) {
+	if (0 == panel_id && display->enabled == false) {
+		pr_err("%s main panel is disabled", __func__);
+		return -1;
+	}
+
+	if (1 == panel_id) {
+		display = get_sec_display();
+		if (!display) {
+			printk(KERN_INFO "oplus_display_get_panel_serial_number and main display is null");
+			return -1;
+		}
+		if (display->enabled == false) {
+			pr_err("%s second panel is disabled", __func__);
+			return -1;
+		}
+	}
+
+	/* if (get_oplus_display_power_status() != OPLUS_DISPLAY_POWER_ON) { */
+	if (display->panel->power_mode != SDE_MODE_DPMS_ON) {
 		printk(KERN_ERR"%s display panel in off status\n", __func__);
 		return ret;
 	}
@@ -369,7 +394,7 @@ int oplus_display_panel_get_serial_number(void *buf)
 	 */
 	for (i = 0; i < 10; i++) {
 		if (!display->panel->oplus_ser.is_reg_lock) {
-			ret = dsi_display_read_panel_reg(get_main_display(), display->panel->oplus_ser.serial_number_reg,
+			ret = dsi_display_read_panel_reg(display, display->panel->oplus_ser.serial_number_reg,
 				read, display->panel->oplus_ser.serial_number_conut);
 		} else {
 			mutex_lock(&display->display_lock);
@@ -379,7 +404,7 @@ int oplus_display_panel_get_serial_number(void *buf)
 				if (display->config.panel_mode == DSI_OP_CMD_MODE) {
 					dsi_display_clk_ctrl(display->dsi_clk_handle, DSI_ALL_CLKS, DSI_CLK_ON);
 				}
-			        {
+				{
 					char value[] = {0x5A, 0x5A};
 					ret = mipi_dsi_dcs_write(&display->panel->mipi_device, 0xF0, value, sizeof(value));
 				}
@@ -394,7 +419,7 @@ int oplus_display_panel_get_serial_number(void *buf)
 				msleep(20);
 				continue;
 			}
-			ret = dsi_display_read_panel_reg(get_main_display(), display->panel->oplus_ser.serial_number_reg,
+			ret = dsi_display_read_panel_reg(display, display->panel->oplus_ser.serial_number_reg,
                 	read, display->panel->oplus_ser.serial_number_conut);
 		}
 
@@ -474,6 +499,7 @@ int oplus_display_get_softiris_color_status(void *data)
 	bool color_softiris_status = false;
 	bool color_dual_panel_status = false;
 	bool color_dual_brightness_status = false;
+	bool color_oplus_calibrate_status = false;
 	struct dsi_parser_utils *utils = NULL;
 	struct dsi_panel *panel = NULL;
 
@@ -510,11 +536,15 @@ int oplus_display_get_softiris_color_status(void *data)
 	color_dual_brightness_status = utils->read_bool(utils->data, "oplus,color_dual_brightness_status");
 	DSI_INFO("oplus,color_dual_brightness_status: %s", color_dual_brightness_status ? "true" : "false");
 
+	color_oplus_calibrate_status = utils->read_bool(utils->data, "oplus,color_oplus_calibrate_status");
+	DSI_INFO("oplus,color_oplus_calibrate_status: %s", color_oplus_calibrate_status ? "true" : "false");
+
 	iris_color_status->color_vivid_status = (uint32_t)color_vivid_status;
 	iris_color_status->color_srgb_status = (uint32_t)color_srgb_status;
 	iris_color_status->color_softiris_status = (uint32_t)color_softiris_status;
 	iris_color_status->color_dual_panel_status = (uint32_t)color_dual_panel_status;
 	iris_color_status->color_dual_brightness_status = (uint32_t)color_dual_brightness_status;
+	iris_color_status->color_oplus_calibrate_status = (uint32_t)color_oplus_calibrate_status;
 
 	return 0;
 }
@@ -531,7 +561,8 @@ int oplus_display_panel_get_id2(void)
 			return 0;
 		}
 
-		if ((!strcmp(display->panel->oplus_priv.vendor_name, "S6E3HC3")) || (!strcmp(display->panel->oplus_priv.vendor_name, "AMB670YF01"))) {
+		if ((!strcmp(display->panel->oplus_priv.vendor_name, "S6E3HC3"))
+			|| (!strcmp(display->panel->oplus_priv.vendor_name, "AMB670YF01"))) {
 			ret = dsi_display_read_panel_reg(display, 0xDB, read, 1);
 			if (ret < 0) {
 				pr_err("failed to read DB ret=%d\n", ret);
@@ -1165,9 +1196,6 @@ int dsi_panel_parse_oplus_config(struct dsi_panel *panel)
 {
 	struct dsi_parser_utils *utils = &panel->utils;
 	int ret = 0;
-
-	/* Add for parse ofp brightness config */
-	dsi_panel_parse_ofp_config(panel);
 
 	panel->oplus_priv.vendor_name = utils->get_property(utils->data,
 				       "oplus,mdss-dsi-vendor-name", NULL);

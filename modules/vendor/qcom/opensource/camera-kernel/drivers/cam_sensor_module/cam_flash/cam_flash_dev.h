@@ -40,7 +40,7 @@
 
 #define CAM_FLASH_PIPELINE_DELAY 1
 
-#define FLASH_DRIVER_I2C "i2c_flash"
+#define FLASH_DRIVER_I2C "cam-i2c-flash"
 
 #define CAM_FLASH_PACKET_OPCODE_INIT                 0
 #define CAM_FLASH_PACKET_OPCODE_SET_OPS              1
@@ -220,6 +220,7 @@ struct cam_flash_ctrl {
 	const char *                        flash_name;
 	/*Add by Fangyan @ Camera 2020/08/17 for flash current*/
 	uint32_t                            flash_current;
+	uint32_t                            flash_max_current;
 #endif
 };
 

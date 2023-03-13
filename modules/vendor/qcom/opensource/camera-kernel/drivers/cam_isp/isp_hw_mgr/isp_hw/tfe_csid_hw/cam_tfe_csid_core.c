@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/iopoll.h>
@@ -21,6 +22,8 @@
 #include "cam_tasklet_util.h"
 #include "cam_common_util.h"
 #include "cam_tfe_csid_hw_intf.h"
+#include <dt-bindings/msm-camera.h>
+#include "cam_cpas_hw_intf.h"
 
 /* Timeout value in msec */
 #define TFE_CSID_TIMEOUT                               1000
@@ -893,6 +896,15 @@ static int cam_tfe_csid_path_reserve(struct cam_tfe_csid_hw *csid_hw,
 	csid_hw->event_cb = reserve->event_cb;
 	csid_hw->event_cb_priv = reserve->event_cb_prv;
 
+	if (path_data->qcfa_bin) {
+		if (!cam_cpas_is_feature_supported(CAM_CPAS_QCFA_BINNING_ENABLE,
+			CAM_CPAS_HW_IDX_ANY, NULL)) {
+			CAM_ERR(CAM_ISP, "QCFA bin not supported!");
+			rc = -EINVAL;
+			goto end;
+		}
+	}
+
 	/* Enable crop only for ipp */
 	if (reserve->res_id == CAM_TFE_CSID_PATH_RES_IPP)
 		path_data->crop_enable = true;
@@ -976,6 +988,13 @@ static int cam_tfe_csid_enable_csi2(
 	cam_io_w_mb(val, soc_info->reg_map[0].mem_base +
 		csid_reg->csi2_reg->csid_csi2_rx_cfg0_addr);
 
+	if (csid_hw->in_res_id >= CAM_ISP_TFE_IN_RES_CPHY_TPG_0 &&
+		csid_hw->in_res_id <= CAM_ISP_TFE_IN_RES_CPHY_TPG_2 &&
+		csid_reg->csi2_reg->need_to_sel_tpg_mux) {
+		cam_cpas_enable_tpg_mux_sel(csid_hw->in_res_id -
+			CAM_ISP_TFE_IN_RES_CPHY_TPG_0);
+	}
+
 	/* rx cfg1 */
 	val = (1 << csid_reg->csi2_reg->csi2_misr_enable_shift_val);
 
@@ -1022,8 +1041,14 @@ static int cam_tfe_csid_enable_csi2(
 
 	cam_io_w_mb(val, soc_info->reg_map[0].mem_base +
 		csid_reg->csi2_reg->csid_csi2_rx_irq_mask_addr);
+	/*
+	 * There is one to one mapping for ppi index with phy index
+	 * we do not always update phy sel equal to phy number,for some
+	 * targets "phy_sel = phy_num + 1", and for some targets it is
+	 * "phy_sel = phy_num", ppi_index should be updated accordingly
+	 */
+	ppi_index = csid_hw->csi2_rx_cfg.phy_sel - csid_reg->csi2_reg->phy_sel_base;
 
-	ppi_index = csid_hw->csi2_rx_cfg.phy_sel;
 	if (csid_hw->ppi_hw_intf[ppi_index] && csid_hw->ppi_enable) {
 		ppi_lane_cfg.lane_type = csid_hw->csi2_rx_cfg.lane_type;
 		ppi_lane_cfg.lane_num  = csid_hw->csi2_rx_cfg.lane_num;
@@ -1067,7 +1092,7 @@ static int cam_tfe_csid_disable_csi2(
 	cam_io_w_mb(0, soc_info->reg_map[0].mem_base +
 		csid_reg->csi2_reg->csid_csi2_rx_cfg1_addr);
 
-	ppi_index = csid_hw->csi2_rx_cfg.phy_sel;
+	ppi_index = csid_hw->csi2_rx_cfg.phy_sel - csid_reg->csi2_reg->phy_sel_base;
 	if (csid_hw->ppi_hw_intf[ppi_index] && csid_hw->ppi_enable) {
 		/* De-Initialize the PPI bridge */
 		CAM_DBG(CAM_ISP, "ppi_index to de-init %d\n", ppi_index);
@@ -2773,6 +2798,19 @@ static int cam_tfe_csid_set_csid_clock(
 	return 0;
 }
 
+static int cam_tfe_csid_dump_csid_clock(
+	struct cam_tfe_csid_hw *csid_hw, void *cmd_args)
+{
+	if (!csid_hw)
+		return -EINVAL;
+
+	CAM_INFO(CAM_ISP, "CSID:%d clock rate %llu",
+		csid_hw->hw_intf->hw_idx,
+		csid_hw->clk_rate);
+
+	return 0;
+}
+
 static int cam_tfe_csid_get_regdump(struct cam_tfe_csid_hw *csid_hw,
 	void *cmd_args)
 {
@@ -3037,6 +3075,9 @@ static int cam_tfe_csid_process_cmd(void *hw_priv,
 	case CAM_ISP_HW_CMD_CSID_CLOCK_UPDATE:
 		rc = cam_tfe_csid_set_csid_clock(csid_hw, cmd_args);
 		break;
+	case CAM_ISP_HW_CMD_CSID_CLOCK_DUMP:
+		rc = cam_tfe_csid_dump_csid_clock(csid_hw, cmd_args);
+		break;
 	case CAM_TFE_CSID_CMD_GET_REG_DUMP:
 		rc = cam_tfe_csid_get_regdump(csid_hw, cmd_args);
 		break;
@@ -3260,7 +3301,7 @@ irqreturn_t cam_tfe_csid_irq(int irq_num, void *data)
 	uint32_t sof_irq_debug_en = 0, log_en = 0;
 	unsigned long flags;
 	uint32_t i, val, val1;
-	struct cam_subdev_msg_payload               subdev_msg;
+	uint32_t data_idx;
 
 	if (!data) {
 		CAM_ERR(CAM_ISP, "CSID: Invalid arguments");
@@ -3268,6 +3309,7 @@ irqreturn_t cam_tfe_csid_irq(int irq_num, void *data)
 	}
 
 	csid_hw = (struct cam_tfe_csid_hw *)data;
+	data_idx = csid_hw->csi2_rx_cfg.phy_sel - 1;
 	CAM_DBG(CAM_ISP, "CSID %d IRQ Handling", csid_hw->hw_intf->hw_idx);
 
 	csid_reg = csid_hw->csid_info->csid_reg;
@@ -3399,10 +3441,8 @@ handle_fatal_error:
 			csid_reg->csi2_reg->csid_csi2_rx_irq_mask_addr);
 		/* phy_sel starts from 1 and should never be zero*/
 		if (csid_hw->csi2_rx_cfg.phy_sel > 0) {
-			subdev_msg.hw_idx = csid_hw->csi2_rx_cfg.phy_sel - 1;
-			subdev_msg.priv_data = 0;
 			cam_subdev_notify_message(CAM_CSIPHY_DEVICE_TYPE,
-				CAM_SUBDEV_MESSAGE_IRQ_ERR, &subdev_msg);
+				CAM_SUBDEV_MESSAGE_REG_DUMP, (void *)&data_idx);
 		}
 		cam_tfe_csid_handle_hw_err_irq(csid_hw,
 			CAM_ISP_HW_ERROR_CSID_FATAL, irq_status);
@@ -3691,9 +3731,23 @@ handle_fatal_error:
 		}
 	}
 
-	if (is_error_irq || log_en)
+	if (is_error_irq || log_en) {
+		CAM_ERR(CAM_ISP,
+			"CSID %d irq status TOP: 0x%x RX: 0x%x IPP: 0x%x",
+			csid_hw->hw_intf->hw_idx,
+			irq_status[TFE_CSID_IRQ_REG_TOP],
+			irq_status[TFE_CSID_IRQ_REG_RX],
+			irq_status[TFE_CSID_IRQ_REG_IPP]);
+		CAM_ERR(CAM_ISP,
+			"RDI0: 0x%x RDI1: 0x%x RDI2: 0x%x CSID clk:%d",
+			irq_status[TFE_CSID_IRQ_REG_RDI0],
+			irq_status[TFE_CSID_IRQ_REG_RDI1],
+			irq_status[TFE_CSID_IRQ_REG_RDI2],
+			csid_hw->clk_rate);
+
 		cam_tfe_csid_handle_hw_err_irq(csid_hw,
 			CAM_ISP_HW_ERROR_NONE, irq_status);
+	}
 
 	if (csid_hw->irq_debug_cnt >= CAM_TFE_CSID_IRQ_SOF_DEBUG_CNT_MAX) {
 		cam_tfe_csid_sof_irq_debug(csid_hw, &sof_irq_debug_en);

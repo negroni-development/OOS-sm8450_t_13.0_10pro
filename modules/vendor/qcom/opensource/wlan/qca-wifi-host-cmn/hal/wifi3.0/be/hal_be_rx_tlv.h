@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -330,10 +330,10 @@ struct rx_pkt_tlvs {
 #define HAL_RX_TLV_MPDU_QOS_CONTROL_VALID_GET(_rx_pkt_tlv)	\
 	HAL_RX_MPDU_START(_rx_pkt_tlv).mpdu_qos_control_valid
 
-#define HAL_RX_GET_FC_VALID(_rx_pkt_tlv)	\
+#define HAL_RX_TLV_GET_FC_VALID(_rx_pkt_tlv)	\
 	HAL_RX_MPDU_START(_rx_pkt_tlv).mpdu_frame_control_valid
 
-#define HAL_RX_GET_TO_DS_FLAG(_rx_pkt_tlv)	\
+#define HAL_RX_TLV_GET_TO_DS_FLAG(_rx_pkt_tlv)	\
 	HAL_RX_MPDU_START(_rx_pkt_tlv).to_ds
 
 #define HAL_RX_MPDU_GET_FRAME_CONTROL_FIELD(_rx_pkt_tlv)	\
@@ -383,6 +383,16 @@ struct rx_pkt_tlvs {
 
 #define HAL_RX_MSDU_END_SA_SW_PEER_ID_GET(_rx_pkt_tlv)	\
 	HAL_RX_MSDU_END(_rx_pkt_tlv).sa_sw_peer_id
+
+/* used by monitor mode for parsing from full TLV */
+#define HAL_RX_MON_GET_FC_VALID(_rx_mpdu_start)	\
+	HAL_RX_GET(rx_mpdu_start, RX_MPDU_INFO, MPDU_FRAME_CONTROL_VALID)
+
+#define HAL_RX_MON_GET_TO_DS_FLAG(_rx_mpdu_start)	\
+	HAL_RX_GET(rx_mpdu_start, RX_MPDU_INFO, TO_DS)
+
+#define HAL_RX_MON_GET_MAC_ADDR2_VALID(_rx_mpdu_start) \
+	HAL_RX_GET(rx_mpdu_start, RX_MPDU_INFO, MAC_ADDR_AD2_VALID)
 
 static inline
 uint32_t hal_rx_tlv_decap_format_get_be(void *hw_desc_addr)
@@ -779,7 +789,7 @@ hal_rx_msdu_packet_metadata_get_generic_be(uint8_t *buf,
 }
 
 /*
- * hal_rx_msdu_start_nss_get_7850(): API to get the NSS
+ * hal_rx_msdu_start_nss_get_kiwi(): API to get the NSS
  * Interval from rx_msdu_start
  *
  * @buf: pointer to the start of RX PKT TLV header
@@ -1322,14 +1332,14 @@ uint8_t hal_rx_get_fc_valid_be(uint8_t *buf)
 {
 	struct rx_pkt_tlvs *rx_pkt_tlvs = (struct rx_pkt_tlvs *)buf;
 
-	return HAL_RX_GET_FC_VALID(rx_pkt_tlvs);
+	return HAL_RX_TLV_GET_FC_VALID(rx_pkt_tlvs);
 }
 
 static inline uint8_t hal_rx_get_to_ds_flag_be(uint8_t *buf)
 {
 	struct rx_pkt_tlvs *rx_pkt_tlvs = (struct rx_pkt_tlvs *)buf;
 
-	return HAL_RX_GET_TO_DS_FLAG(rx_pkt_tlvs);
+	return HAL_RX_TLV_GET_TO_DS_FLAG(rx_pkt_tlvs);
 }
 
 static inline uint8_t hal_rx_get_mac_addr2_valid_be(uint8_t *buf)
@@ -1527,6 +1537,17 @@ uint16_t hal_rx_get_rx_sequence_be(uint8_t *buf)
 }
 
 #ifdef RECEIVE_OFFLOAD
+#ifdef QCA_WIFI_KIWI_V2
+static inline
+uint16_t hal_rx_get_fisa_cumulative_l4_checksum_be(uint8_t *buf)
+{
+	/*
+	 * cumulative l4 checksum is not supported in V2 and
+	 * cumulative_l4_checksum field is not present
+	 */
+	return 0;
+}
+#else
 /**
  * hal_rx_get_fisa_cumulative_l4_checksum_be() - Retrieve cumulative
  *                                                 checksum
@@ -1541,6 +1562,7 @@ uint16_t hal_rx_get_fisa_cumulative_l4_checksum_be(uint8_t *buf)
 
 	return HAL_RX_TLV_GET_FISA_CUMULATIVE_L4_CHECKSUM(rx_pkt_tlvs);
 }
+#endif
 
 /**
  * hal_rx_get_fisa_cumulative_ip_length_be() - Retrieve cumulative

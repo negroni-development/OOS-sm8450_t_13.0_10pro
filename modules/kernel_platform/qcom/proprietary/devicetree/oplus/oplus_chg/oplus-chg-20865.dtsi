@@ -1,9 +1,7 @@
 //ifdef OPLUS_FEATURE_CHG_BASIC
-//Jianchao.Shi@BSP.CHG.Basic, 2021/05/29, sjc Add for charging, 1+
 
 #include "oplus_chg_20865.h"
 
-//#ifdef OPLUS_FEATURE_CHG_BASIC /* Jianchao.Shi@BSP.CHG.Basic, 2020/05/20, sjc Add for charging */
 &soc {
 	oplus,adsp-voocphy {
 		compatible = "oplus,adsp-voocphy";
@@ -11,7 +9,7 @@
 };
 
 &battery_charger {
-	//for oppo chg framework:
+	//for oplus chg framework:
 	oplus,chg_ops = "plat-pmic";
 	qcom,smart_charging_screenoff;
 	qcom,voocphy_support = <1>;
@@ -542,10 +540,7 @@
 		qcom,drive-strength = <2>;
 	};
 };*/
-//#endif OPLUS_FEATURE_CHG_BASIC
 
-
-//#ifdef OPLUS_FEATURE_CHG_BASIC /* Jianchao.Shi@BSP.CHG.Basic, 2020/05/20, sjc Add for charging */
 &battery_charger {
 	oplus,ic_type = <OPLUS_CHG_IC_BUCK>;
 	oplus,ic_index = <0>;

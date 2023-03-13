@@ -4,15 +4,12 @@
 *
 * Version: 1.0
 * Date: 2021-07-12
-* Author: laq@BSP.sensor
 *
 * ------------------------------ Revision History: --------------------------------
 * <version>           <date>                <author>                            <desc>
-* Revision 1.0       2021-07-12            laq@BSP.sensor     Created for oplus sensor dtsi
 ***********************************************************************************/
 &soc {
 	//#ifdef OPLUS_FEATURE_SENSOR_SMEM
-	/*yajie.chen @BSP.sensor, 2020/04/03, Add for sensor dts*/
 	/*enum sensor_id { OPLUS_ACCEL,OPLUS_GYRO,OPLUS_MAG,OPLUS_LIGHT,OPLUS_PROXIMITY,OPLUS_SAR,OPLUS_CT,OPLUS_BAROMETER,SENSORS_NUM};*/
 	sensor_fb: sensor_fb {
 		compatible = "oplus,sensor-feedback";
@@ -124,12 +121,12 @@
 		};
 		/*virtual sensor
 		enum sensor_algo_id {
-			OPPO_PICKUP_DETECT,
-			OPPO_LUX_AOD,
-			OPPO_TP_GESTURE,
-			OPPO_FP_DISPLAY,
-			OPPO_FREE_FALL,
-			OPPO_CAMERA_PROTECT,
+			OPLUS_PICKUP_DETECT,
+			OPLUS_LUX_AOD,
+			OPLUS_TP_GESTURE,
+			OPLUS_FP_DISPLAY,
+			OPLUS_FREE_FALL,
+			OPLUS_CAMERA_PROTECT,
 			SENSOR_ALGO_NUM
 		}*/
 		pickup_detect {

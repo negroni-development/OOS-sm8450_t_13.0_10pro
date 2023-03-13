@@ -45,6 +45,10 @@ enum aon_sensor_cmd_opcode {
 	AON_SENSOR_CMD_READREG,
 	AON_SENSOR_CMD_GETMEM,
 	AON_SENSOR_CMD_OPMCLK,
+#ifdef MTK_AON
+	AON_SENSOR_CMD_VCM_POWER,
+	AON_SENSOR_CMD_GET_EEPROM_INFO,
+#endif
 	AON_SENSOR_CMD_MAX
 };
 
@@ -54,6 +58,15 @@ struct aon_sensor_cmd_buf_desc {
 	int powerup_setting_count;
 	int powerdown_setting_offset;
 	int powerdown_setting_count;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	int shiftmode_setting_offset;
+	int shiftmode_setting_count;
+#endif
+#ifdef MTK_AON
+	int powerup_vcm_setting_offset;
+	int powerup_vcm_setting_count;
+	int eeprom_slave_info_offset;
+#endif
 	int config_regsetting_offset;
 	int config_regsetting_count;
 	int read_regs_offset;
@@ -63,7 +76,10 @@ struct aon_sensor_cmd_buf_desc {
 	u8  is_streamon_config_valid;
 	u8  is_streamoff_config_valid;
 	u8  is_res_config_valid;
-	u8  mclk_enabled;
+	u8 mclk_enabled;
+#ifdef MTK_AON
+	u8 vcm_power_on;
+#endif
 };
 
 struct aon_sensor_cmd {
@@ -75,12 +91,18 @@ struct aon_sensor_cmd {
 
 struct aon_slave_info_data {
 	unsigned int  slave_address;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	unsigned int  sub_slave_address;
+#endif
 	unsigned int  sensor_id_regaddr;
 	unsigned int  sensor_id;
 	unsigned int  sensor_id_mask;
 	unsigned char i2c_frequency_mode;
 	unsigned char reg_addrtype;
 	unsigned char reg_datatype;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	unsigned char needI2cSwitch;
+#endif
 	unsigned char reserve;
 };
 
@@ -179,6 +201,9 @@ struct aon_control {
  */
 struct aon_cmd_i2c_info {
 	u16    slave_addr;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	u16    sub_slave_addr;
+#endif
 	u8     i2c_freq_mode;
 } __attribute__((packed));
 
@@ -194,6 +219,9 @@ struct aon_cmd_i2c_info {
 struct aon_cmd_probe {
 	u8     data_type;
 	u8     addr_type;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	u8     needI2cSwitch;
+#endif
 	u32    reg_addr;
 	u32    expected_data;
 	u32    data_mask;

@@ -13,16 +13,14 @@
 #include "oplus_display_panel_seed.h"
 #include "oplus_dsi_support.h"
 #include "oplus_display_private_api.h"
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
 #include "oplus_onscreenfingerprint.h"
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 int seed_mode = 0;
 extern int oplus_seed_backlight;
 /* outdoor hbm flag*/
-
-#define PANEL_LOADING_EFFECT_FLAG 100
-#define PANEL_LOADING_EFFECT_MODE1 101
-#define PANEL_LOADING_EFFECT_MODE2 102
-#define PANEL_LOADING_EFFECT_OFF 100
 
 DEFINE_MUTEX(oplus_seed_lock);
 
@@ -57,7 +55,7 @@ int dsi_panel_seed_mode_unlock(struct dsi_panel *panel, int mode)
 
 		if (rc) {
 			pr_err("[%s] failed to send DSI_CMD_SEED_MODE0 cmds, rc=%d\n",
-			       panel->name, rc);
+					panel->name, rc);
 		}
 
 		break;
@@ -67,7 +65,7 @@ int dsi_panel_seed_mode_unlock(struct dsi_panel *panel, int mode)
 
 		if (rc) {
 			pr_err("[%s] failed to send DSI_CMD_SEED_MODE1 cmds, rc=%d\n",
-			       panel->name, rc);
+					panel->name, rc);
 		}
 
 		break;
@@ -77,7 +75,7 @@ int dsi_panel_seed_mode_unlock(struct dsi_panel *panel, int mode)
 
 		if (rc) {
 			pr_err("[%s] failed to send DSI_CMD_SEED_MODE2 cmds, rc=%d\n",
-			       panel->name, rc);
+					panel->name, rc);
 		}
 
 		break;
@@ -87,7 +85,7 @@ int dsi_panel_seed_mode_unlock(struct dsi_panel *panel, int mode)
 
 		if (rc) {
 			pr_err("[%s] failed to send DSI_CMD_SEED_MODE3 cmds, rc=%d\n",
-			       panel->name, rc);
+					panel->name, rc);
 		}
 
 		break;
@@ -97,7 +95,7 @@ int dsi_panel_seed_mode_unlock(struct dsi_panel *panel, int mode)
 
 		if (rc) {
 			pr_err("[%s] failed to send DSI_CMD_SEED_MODE4 cmds, rc=%d\n",
-			       panel->name, rc);
+					panel->name, rc);
 		}
 
 		break;
@@ -107,11 +105,11 @@ int dsi_panel_seed_mode_unlock(struct dsi_panel *panel, int mode)
 
 		if (rc) {
 			pr_err("[%s] failed to send DSI_CMD_SEED_OFF cmds, rc=%d\n",
-			       panel->name, rc);
+					panel->name, rc);
 		}
 
 		pr_err("[%s] seed mode Invalid %d\n",
-		       panel->name, mode);
+				panel->name, mode);
 	}
 
 	return rc;
@@ -131,7 +129,7 @@ int dsi_panel_loading_effect_mode_unlock(struct dsi_panel *panel, int mode)
 
 		if (rc) {
 			pr_err("[%s] failed to send DSI_CMD_SEED_MODE0 cmds, rc=%d\n",
-			       panel->name, rc);
+					panel->name, rc);
 		}
 
 		break;
@@ -141,7 +139,7 @@ int dsi_panel_loading_effect_mode_unlock(struct dsi_panel *panel, int mode)
 
 		if (rc) {
 			pr_err("[%s] failed to send DSI_CMD_SEED_MODE1 cmds, rc=%d\n",
-			       panel->name, rc);
+					panel->name, rc);
 		}
 
 		break;
@@ -151,7 +149,7 @@ int dsi_panel_loading_effect_mode_unlock(struct dsi_panel *panel, int mode)
 
 		if (rc) {
 			pr_err("[%s] failed to send DSI_CMD_SEED_MODE2 cmds, rc=%d\n",
-			       panel->name, rc);
+					panel->name, rc);
 		}
 
 		break;
@@ -161,11 +159,11 @@ int dsi_panel_loading_effect_mode_unlock(struct dsi_panel *panel, int mode)
 
 		if (rc) {
 			pr_err("[%s] failed to send DSI_CMD_LOADING_EFFECT_OFF cmds, rc=%d\n",
-			       panel->name, rc);
+					panel->name, rc);
 		}
 
 		pr_err("[%s] loading effect mode Invalid %d\n",
-		       panel->name, mode);
+				panel->name, mode);
 	}
 
 	return rc;
@@ -180,23 +178,12 @@ int dsi_panel_seed_mode(struct dsi_panel *panel, int mode)
 		return -EINVAL;
 	}
 
-	//mutex_lock(&panel->panel_lock);
-
-	if (!strcmp(panel->oplus_priv.vendor_name, "S6E3HC3") && (mode >= PANEL_LOADING_EFFECT_FLAG)) {
+	if (mode >= PANEL_LOADING_EFFECT_FLAG) {
 		rc = dsi_panel_loading_effect_mode_unlock(panel, mode);
-	} else if (!strcmp(panel->oplus_priv.vendor_name, "ANA6706") && (mode >= PANEL_LOADING_EFFECT_FLAG)) {
-		mode = mode - PANEL_LOADING_EFFECT_FLAG;
-		rc = dsi_panel_seed_mode_unlock(panel, mode);
-		seed_mode = mode;
-	} else if(!strcmp(panel->oplus_priv.vendor_name, "AMB655X") && (mode >= PANEL_LOADING_EFFECT_FLAG)){
-		rc = dsi_panel_loading_effect_mode_unlock(panel, mode);
-	} else if(!strcmp(panel->oplus_priv.vendor_name, "AMB670YF01") && (mode >= PANEL_LOADING_EFFECT_FLAG)){
-		rc = dsi_panel_loading_effect_mode_unlock(panel, mode);
-	}else {
+	} else {
 		rc = dsi_panel_seed_mode_unlock(panel, mode);
 	}
 
-	//mutex_unlock(&panel->panel_lock);
 	return rc;
 }
 
@@ -210,32 +197,33 @@ int dsi_display_seed_mode(struct dsi_display *display, int mode)
 	}
 
 	mutex_lock(&display->display_lock);
+	mutex_lock(&display->panel->panel_lock);
 
 	/* enable the clk vote for CMD mode panels */
 	if (display->config.panel_mode == DSI_OP_CMD_MODE) {
 		dsi_display_clk_ctrl(display->dsi_clk_handle,
-				     DSI_CORE_CLK, DSI_CLK_ON);
+				DSI_CORE_CLK, DSI_CLK_ON);
 	}
 
 	rc = dsi_panel_seed_mode(display->panel, mode);
 
 	if (rc) {
 		pr_err("[%s] failed to dsi_panel_seed_or_loading_effect_on, rc=%d\n",
-		       display->name, rc);
+				display->name, rc);
 	}
 
 	if (display->config.panel_mode == DSI_OP_CMD_MODE) {
 		rc = dsi_display_clk_ctrl(display->dsi_clk_handle,
-					  DSI_CORE_CLK, DSI_CLK_OFF);
+				DSI_CORE_CLK, DSI_CLK_OFF);
 	}
 
+	mutex_unlock(&display->panel->panel_lock);
 	mutex_unlock(&display->display_lock);
 	return rc;
 }
 
-int oplus_dsi_update_seed_mode(void)
+int oplus_dsi_update_seed_mode(struct dsi_display *display)
 {
-	struct dsi_display *display = get_main_display();
 	int ret = 0;
 
 	if (!display) {
@@ -260,64 +248,39 @@ int oplus_display_panel_get_seed(void *data)
 int oplus_display_panel_set_seed(void *data)
 {
 	uint32_t *temp_save = data;
+	uint32_t panel_id = (*temp_save >> 12);
+	struct dsi_display *display = oplus_display_get_current_display();
+	seed_mode = (*temp_save & 0x0fff);
+	printk(KERN_INFO "%s oplus_display_set_seed = %d, panel_id = %d\n", __func__, seed_mode, panel_id);
 
-	printk(KERN_INFO "%s oplus_display_set_seed = %d\n", __func__, *temp_save);
-	seed_mode = *temp_save;
+	__oplus_display_set_seed(seed_mode);
 
-	__oplus_display_set_seed(*temp_save);
-
-	if (get_oplus_display_power_status() == OPLUS_DISPLAY_POWER_ON) {
-		if (get_main_display() == NULL) {
-			printk(KERN_INFO "oplus_display_set_seed and main display is null");
-			return -EINVAL;
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported() && !oplus_ofp_oled_capacitive_is_enabled()
+			&& !oplus_ofp_local_hbm_is_enabled()) {
+		if (oplus_ofp_get_hbm_state()) {
+			OFP_INFO("should not set seed in hbm state\n");
+			return 0;
 		}
-
-		dsi_display_seed_mode(get_main_display(), seed_mode);
-
-	} else {
-		printk(KERN_ERR
-		       "%s oplus_display_set_seed = %d, but now display panel status is not on\n",
-		       __func__, *temp_save);
 	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
+
+	if (1 == panel_id) {
+		display = get_sec_display();
+	}
+
+	if (display == NULL) {
+		printk(KERN_INFO "oplus_display_set_seed and main display is null");
+		return -EINVAL;
+	}
+	if (display->panel->power_mode != SDE_MODE_DPMS_ON) {
+		printk(KERN_ERR
+			"<%s> %s oplus_display_set_seed = %d, but now display panel power_mode is not on\n",
+			display->panel->oplus_priv.vendor_name, __func__, seed_mode);
+		return -EINVAL;
+	}
+
+	dsi_display_seed_mode(display, seed_mode);
 
 	return 0;
-}
-
-void oplus_ofp_handle_display_effect(struct dsi_display *display, int hbm_status)
-{
-	int ret;
-
-	if (!display) {
-		pr_err("failed for: %s %d\n", __func__, __LINE__);
-		return;
-	}
-	switch(hbm_status) {
-	case OFP_SYNC_DEFAULT:
-			if (oplus_seed_backlight) {
-				int frame_time_us;
-
-				frame_time_us = mult_frac(1000, 1000, display->panel->cur_mode->timing.refresh_rate);
-				oplus_panel_process_dimming_v2(display->panel, display->panel->bl_config.bl_level, true);
-				mipi_dsi_dcs_set_display_brightness(&display->panel->mipi_device, display->panel->bl_config.bl_level);
-				oplus_panel_process_dimming_v2_post(display->panel, true);
-				usleep_range(frame_time_us, frame_time_us + 100);
-			}
-			break;
-	case OFP_SYNC_BEFORE_HBM_ON:
-			ret = dsi_panel_seed_mode(display->panel, PANEL_LOADING_EFFECT_OFF);
-			if (ret) {
-				pr_err("[%s] failed to set loading effect off, ret=%d\n",
-					display->panel->name, ret);
-			}
-			break;
-	case OFP_SYNC_BEFORE_HBM_OFF:
-			ret = dsi_panel_seed_mode(display->panel, seed_mode);
-			if (ret) {
-				pr_err("[%s] failed to set seed mode, ret=%d\n",
-					display->panel->name, ret);
-			}
-			break;
-	default:
-		break;
-	}
 }

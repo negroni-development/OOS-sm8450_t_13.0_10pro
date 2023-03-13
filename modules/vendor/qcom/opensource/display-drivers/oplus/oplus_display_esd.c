@@ -62,7 +62,7 @@ bool oplus_display_validate_reg_read(struct dsi_panel *panel)
 {
 	int i = 0, tmp = 0;
 	u32 *lenp, len = 0, cmd_count = 0;
-	u32 data_offset = 0, group_offset = 0;
+	u32 data_offset = 0, group_offset = 0, value_offset = 0;
 	u32 cmd_index = 0, data_index = 0, group_index = 0;
 	u32 match_modes = 0, mode = 0;
 	bool matched, group_mode0_matched, group_mode1_matched, group_matched;
@@ -95,14 +95,15 @@ bool oplus_display_validate_reg_read(struct dsi_panel *panel)
 
 			for (data_index = 0; data_index < lenp[cmd_index]; ++data_index) {
 				matched = true;
+				value_offset = group_offset + data_offset + data_index;
 
 				if (!mode && config->return_buf[data_offset + data_index] !=
-						config->status_value[group_offset + data_index]) {
+						config->status_value[value_offset]) {
 					matched = false;
 					group_mode0_matched = false;
 				}
 				else if (mode && config->return_buf[data_offset + data_index] ==
-						config->status_value[group_offset + data_index]) {
+						config->status_value[value_offset]) {
 					matched = false;
 					tmp++;
 				}
@@ -111,7 +112,7 @@ bool oplus_display_validate_reg_read(struct dsi_panel *panel)
 					DSI_ERR("[DEBUG]ESD check at index/group:[%d/%d] exp:[0x%02X] ret:[0x%02X] mode:[%u] matched:[%d]\n",
 							data_offset + data_index,
 							group_index,
-							config->status_value[group_offset + data_index],
+							config->status_value[value_offset],
 							config->return_buf[data_offset + data_index],
 							mode,
 							matched);

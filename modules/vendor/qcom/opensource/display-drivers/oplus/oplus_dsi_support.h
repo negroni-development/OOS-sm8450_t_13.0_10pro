@@ -38,14 +38,6 @@ enum oplus_display_power_status {
 	OPLUS_DISPLAY_POWER_ON_UNKNOW,
 };
 
-enum oplus_display_scene {
-	OPLUS_DISPLAY_NORMAL_SCENE = 0,
-	OPLUS_DISPLAY_NORMAL_HBM_SCENE,
-	OPLUS_DISPLAY_AOD_SCENE,
-	OPLUS_DISPLAY_AOD_HBM_SCENE,
-	OPLUS_DISPLAY_UNKNOW_SCENE,
-};
-
 enum oplus_display_feature {
 	OPLUS_DISPLAY_HDR = 0,
 	OPLUS_DISPLAY_SEED,
@@ -109,13 +101,16 @@ void set_oplus_display_power_status(enum oplus_display_power_status power_status
 
 enum oplus_display_power_status get_oplus_display_power_status(void);
 
-void set_oplus_display_scene(enum oplus_display_scene display_scene);
-
-enum oplus_display_scene get_oplus_display_scene(void);
-
 bool is_oplus_display_support_feature(enum oplus_display_feature feature_name);
 
 int oplus_display_get_resolution(unsigned int *xres, unsigned int *yres);
+
+/* add for dual panel */
+void oplus_display_set_current_display(void *dsi_display);
+
+void oplus_display_update_current_display(void);
+
+struct dsi_display *oplus_display_get_current_display(void);
 
 #endif /* _OPLUS_DSI_SUPPORT_H_ */
 

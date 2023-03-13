@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "msm_vidc_control.h"
@@ -123,13 +124,6 @@ static const char *const mpeg_video_hevc_profile[] = {
 	NULL,
 };
 
-static const char *const roi_map_type[] = {
-	"None",
-	"2-bit",
-	"2-bit",
-	NULL,
-};
-
 static u32 msm_vidc_get_port_info(struct msm_vidc_inst *inst,
 	enum msm_vidc_inst_capability_type cap_id)
 {
@@ -206,7 +200,7 @@ static int msm_vidc_packetize_control(struct msm_vidc_inst *inst,
 		payload_size);
 	if (rc) {
 		i_vpr_e(inst, "%s: failed to set cap[%d] %s to fw\n",
-			__func__, cap_id, cap_name(cap_id));
+			func, cap_id, cap_name(cap_id));
 		return rc;
 	}
 
@@ -328,7 +322,7 @@ static int msm_vidc_get_parent_value(struct msm_vidc_inst* inst,
 {
 	int rc = 0;
 
-	if (is_parent_available(inst, cap, parent, __func__)) {
+	if (is_parent_available(inst, cap, parent, func)) {
 		switch (parent) {
 		case BITRATE_MODE:
 			*value = inst->hfi_rc_type;
@@ -877,14 +871,6 @@ int msm_v4l2_op_s_ctrl(struct v4l2_ctrl *ctrl)
 		goto exit;
 	}
 
-	if (ctrl->id == V4L2_CID_MPEG_VIDC_LOWLATENCY_REQUEST) {
-		if (ctrl->val == V4L2_MPEG_MSM_VIDC_ENABLE) {
-			rc = msm_vidc_set_seq_change_at_sync_frame(inst);
-			if (rc)
-				return rc;
-		}
-	}
-
 exit:
 	if (rc)
 		msm_vidc_free_capabililty_list(inst, CHILD_LIST | FW_LIST);
@@ -1346,7 +1332,7 @@ int msm_vidc_adjust_slice_count(void *instance, struct v4l2_ctrl *ctrl)
 	mbpf = NUM_MBS_PER_FRAME(output_height, output_width);
 	mbps = NUM_MBS_PER_SEC(output_height, output_width, fps);
 	max_mbpf = NUM_MBS_PER_FRAME(max_height, max_width);
-	max_mbps = NUM_MBS_PER_SEC(max_height, max_width, fps);
+	max_mbps = NUM_MBS_PER_SEC(max_height, max_width, MAX_SLICES_FRAME_RATE);
 
 	if (mbpf > max_mbpf || mbps > max_mbps) {
 		adjusted_value = V4L2_MPEG_VIDEO_MULTI_SLICE_MODE_SINGLE;
@@ -2350,6 +2336,12 @@ int msm_vidc_adjust_session_priority(void *instance, struct v4l2_ctrl *ctrl)
 				capability->cap[OPERATING_RATE].value >> 16,
 				capability->cap[OPERATING_RATE].max >> 16);
 			rc = -ENOMEM;
+			goto exit;
+		}
+
+		rc = msm_vidc_check_core_mbpf(inst);
+		if (rc) {
+			i_vpr_e(inst, "%s: unsupported load\n", __func__);
 			goto exit;
 		}
 	}
@@ -3781,26 +3773,6 @@ int msm_vidc_set_pipe(void *instance,
 	pipe = inst->capabilities->cap[PIPE].value;
 	rc = msm_vidc_packetize_control(inst, cap_id, HFI_PAYLOAD_U32,
 			&pipe, sizeof(u32), __func__);
-	if (rc)
-		return rc;
-
-	return rc;
-}
-
-int msm_vidc_set_seq_change_at_sync_frame(void *instance)
-{
-	int rc = 0;
-	u32 payload;
-	struct msm_vidc_inst* inst = (struct msm_vidc_inst*)instance;
-
-	if (!inst || !inst->capabilities) {
-		d_vpr_e("%s: invalid params\n", __func__);
-		return -EINVAL;
-	}
-
-	payload = inst->capabilities->cap[LOWLATENCY_MODE].value;
-	rc = msm_vidc_packetize_control(inst, LOWLATENCY_MODE, HFI_PAYLOAD_U32,
-		&payload, sizeof(u32), __func__);
 	if (rc)
 		return rc;
 

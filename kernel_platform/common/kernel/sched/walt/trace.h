@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #undef TRACE_SYSTEM
@@ -963,9 +964,9 @@ TRACE_EVENT(sched_cpu_util,
 		__field(unsigned int,	nr_running)
 		__field(long,		cpu_util)
 		__field(long,		cpu_util_cum)
-		__field(unsigned int,	capacity_curr)
-		__field(unsigned int,	capacity)
-		__field(unsigned int,	capacity_orig)
+		__field(unsigned long,	capacity_curr)
+		__field(unsigned long,	capacity)
+		__field(unsigned long,	capacity_orig)
 		__field(unsigned int,	idle_exit_latency)
 		__field(u64,		irqload)
 		__field(int,		online)
@@ -995,7 +996,7 @@ TRACE_EVENT(sched_cpu_util,
 		__entry->prs_gprs	= wrq->prev_runnable_sum + wrq->grp_time.prev_runnable_sum;
 	),
 
-	TP_printk("cpu=%d nr_running=%d cpu_util=%ld cpu_util_cum=%ld capacity_curr=%u capacity=%u capacity_orig=%u idle_exit_latency=%u irqload=%llu online=%u, inactive=%u, reserved=%u, high_irq_load=%u nr_rtg_hp=%u prs_gprs=%llu",
+	TP_printk("cpu=%d nr_running=%d cpu_util=%ld cpu_util_cum=%ld capacity_curr=%lu capacity=%lu capacity_orig=%lu idle_exit_latency=%u irqload=%llu online=%u, inactive=%u, reserved=%u, high_irq_load=%u nr_rtg_hp=%u prs_gprs=%llu",
 		__entry->cpu, __entry->nr_running, __entry->cpu_util,
 		__entry->cpu_util_cum, __entry->capacity_curr,
 		__entry->capacity, __entry->capacity_orig,
@@ -1035,9 +1036,9 @@ TRACE_EVENT(sched_compute_energy,
 		__field(unsigned long,	m0)
 		__field(unsigned long,	m1)
 		__field(unsigned long,	m2)
-		__field(u16,	c0)
-		__field(u16,	c1)
-		__field(u16,	c2)
+		__field(unsigned long,	c0)
+		__field(unsigned long,	c1)
+		__field(unsigned long,	c2)
 	),
 
 	TP_fast_assign(
@@ -1151,11 +1152,13 @@ TRACE_EVENT(sched_find_best_target,
 		 unsigned long candidates,
 		 int most_spare_cap,
 		 int order_index, int end_index,
-		 int skip, bool running),
+		 int skip, bool running,
+		 int most_spare_rq_cpu, unsigned int cpu_rq_runnable_cnt),
 
 	TP_ARGS(tsk, min_util, start_cpu, candidates,
 		most_spare_cap,
-		order_index, end_index, skip, running),
+		order_index, end_index, skip, running,
+		most_spare_rq_cpu, cpu_rq_runnable_cnt),
 
 	TP_STRUCT__entry(
 		__array(char,		comm, TASK_COMM_LEN)
@@ -1168,6 +1171,8 @@ TRACE_EVENT(sched_find_best_target,
 		__field(int,		end_index)
 		__field(int,		skip)
 		__field(bool,		running)
+		__field(int,		most_spare_rq_cpu)
+		__field(unsigned int,	cpu_rq_runnable_cnt)
 		),
 
 	TP_fast_assign(
@@ -1181,9 +1186,11 @@ TRACE_EVENT(sched_find_best_target,
 		__entry->end_index	= end_index;
 		__entry->skip		= skip;
 		__entry->running	= running;
+		__entry->most_spare_rq_cpu	= most_spare_rq_cpu;
+		__entry->cpu_rq_runnable_cnt	= cpu_rq_runnable_cnt;
 		),
 
-	TP_printk("pid=%d comm=%s start_cpu=%d candidates=%#lx most_spare_cap=%d order_index=%d end_index=%d skip=%d running=%d",
+	TP_printk("pid=%d comm=%s start_cpu=%d candidates=%#lx most_spare_cap=%d order_index=%d end_index=%d skip=%d running=%d min_util=%lu spare_rq_cpu=%d min_runnable=%u",
 		  __entry->pid, __entry->comm,
 		  __entry->start_cpu,
 		  __entry->candidates,
@@ -1191,7 +1198,10 @@ TRACE_EVENT(sched_find_best_target,
 		  __entry->order_index,
 		  __entry->end_index,
 		  __entry->skip,
-		  __entry->running)
+		  __entry->running,
+		  __entry->min_util,
+		  __entry->most_spare_rq_cpu,
+		  __entry->cpu_rq_runnable_cnt)
 );
 
 TRACE_EVENT(sched_enq_deq_task,
@@ -1357,258 +1367,43 @@ TRACE_EVENT(sched_cgroup_attach,
 			__entry->grp_id, __entry->ret)
 
 );
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
-TRACE_EVENT(sched_in_fbg,
-	TP_PROTO(struct task_struct *p, int grp),
 
-	TP_ARGS(p, grp),
+TRACE_EVENT(update_cpu_capacity,
+
+	TP_PROTO(int cpu, unsigned long rt_pressure, unsigned long capacity),
+
+	TP_ARGS(cpu, rt_pressure, capacity),
 
 	TP_STRUCT__entry(
-		__array(	char,	comm,	TASK_COMM_LEN	)
-		__field(	pid_t,	pid			)
-		__field(	int,	grp		)
+		__field(int, cpu)
+		__field(unsigned long, rt_pressure)
+		__field(unsigned long, capacity)
+		__field(unsigned long, arch_capacity)
+		__field(unsigned long, thermal_cap)
+		__field(unsigned long, max_possible_freq)
+		__field(unsigned long, max_freq)
 	),
 
 	TP_fast_assign(
-			memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
-			__entry->pid		= p->pid;
-			__entry->grp	= grp;
+		struct walt_sched_cluster *cluster = cpu_cluster(cpu);
+
+		__entry->cpu = cpu;
+		__entry->rt_pressure = rt_pressure;
+		__entry->capacity = capacity;
+		__entry->arch_capacity = arch_scale_cpu_capacity(cpu);
+		__entry->thermal_cap = arch_scale_cpu_capacity(cpu) -
+					arch_scale_thermal_pressure(cpu);
+		__entry->max_freq = cluster->max_freq;
+		__entry->max_possible_freq = cluster->max_possible_freq;
 	),
 
-	TP_printk("pid=%d comm=%s in_grp=%d",
-	      __entry->pid, __entry->comm, __entry->grp)
-);
-
-TRACE_EVENT(sched_fbg_rt,
-
-	TP_PROTO(struct task_struct *p, int orig_cpu, int fbg_cpu, unsigned long lowest_mask),
-
-	TP_ARGS(p, orig_cpu, fbg_cpu, lowest_mask),
-
-	TP_STRUCT__entry(
-		__field(int,            pid)
-		__array(char,           comm, TASK_COMM_LEN)
-		__field(int,            orig_cpu)
-		__field(int,            fbg_cpu)
-		__field(unsigned long,            lowest_mask)
-	),
-
-	TP_fast_assign(
-		__entry->pid                    = p->pid;
-		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
-		__entry->orig_cpu               = orig_cpu;
-		__entry->fbg_cpu                = fbg_cpu;
-		__entry->lowest_mask            = lowest_mask;
-	),
-
-	TP_printk("pid=%d comm=%s orig_cpu=%d fbg_cpu=%d lowest_mask=%#lx",
-		 __entry->pid, __entry->comm, __entry->orig_cpu, __entry->fbg_cpu, __entry->lowest_mask
-	)
-);
-TRACE_EVENT(fbg_tick_task,
-	TP_PROTO(struct task_struct *p, int depth),
-
-	TP_ARGS(p, depth),
-
-	TP_STRUCT__entry(
-		__array(        char,   comm,   TASK_COMM_LEN   )
-		__field(        pid_t,  pid                     )
-		__field(        int,    depth                   )
-	),
-
-	TP_fast_assign(
-		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
-		__entry->pid            = p->pid;
-		__entry->depth          = depth;
-	),
-
-	TP_printk("pid=%d comm=%s depth=%d",
-		__entry->pid, __entry->comm, __entry->depth)
-);
-
-TRACE_EVENT(task_exec_scale,
-	TP_PROTO(int cpu, u64 scale, u64 curr_freq, u64 capacity, u64 max_freq),
-
-	TP_ARGS(cpu, scale, curr_freq, capacity, max_freq),
-
-	TP_STRUCT__entry(
-		__field(	int,	cpu			)
-		__field(	u64,	scale			)
-		__field(	u64,	curr_freq		)
-		__field(	u64,	capacity		)
-		__field(	u64,	max_freq		)
-	),
-
-	TP_fast_assign(
-			__entry->cpu		= cpu;
-			__entry->scale		= scale;
-			__entry->curr_freq		= curr_freq;
-			__entry->capacity		= capacity;
-			__entry->max_freq		= max_freq;
-	),
-
-	TP_printk("cpu=%d scale=%llu curr_freq=%llu capacity=%llu max_freq=%llu",
-	      __entry->cpu, __entry->scale, __entry->curr_freq, __entry->capacity, __entry->max_freq)
+	TP_printk("cpu=%d arch_capacity=%lu thermal_cap=%lu rt_pressure=%lu max_freq=%lu max_possible_freq=%lu capacity=%lu",
+			__entry->cpu, __entry->arch_capacity,
+			__entry->thermal_cap, __entry->rt_pressure,
+			__entry->max_freq, __entry->max_possible_freq,
+			__entry->capacity)
 
 );
-
-TRACE_EVENT(add_group_delta,
-	TP_PROTO(u64 wall_clock, u64 mark_start, u64 window_start, u64 exec,
-		u64 scale, u64 task_exec_scale),
-
-	TP_ARGS(wall_clock, mark_start, window_start, exec, scale, task_exec_scale),
-
-	TP_STRUCT__entry(
-		__field(        u64,    wall_clock              )
-		__field(        u64,    mark_start              )
-		__field(        u64,    window_start            )
-		__field(        u64,    exec            )
-		 __field(        u64,    scale           )
-		__field(        u64,    task_exec_scale         )
-	),
-
-	TP_fast_assign(
-		__entry->wall_clock     = wall_clock;
-		__entry->mark_start     = mark_start;
-		__entry->window_start   = window_start;
-		__entry->exec   = exec;
-		__entry->scale  = scale;
-		__entry->task_exec_scale        = task_exec_scale;
-	),
-
-	TP_printk("wall_clock=%llu mark_start=%llu window_start=%llu curr_window_exec=%llu curr_window_scale=%llu task_exec_scale=%llu",
-		__entry->wall_clock, __entry->mark_start, __entry->window_start, __entry->exec, __entry->scale, __entry->task_exec_scale)
-);
-
-TRACE_EVENT(add_group_demand,
-	TP_PROTO(struct task_struct *p, int event, u64 scale, u64 task_exec_scale, int nr_running),
-
-	TP_ARGS(p, event, scale, task_exec_scale, nr_running),
-
-	TP_STRUCT__entry(
-		__array(        char,   comm,   TASK_COMM_LEN   )
-		__field(        pid_t,  pid                     )
-		__field(        int,    event           )
-		__field(        u64,    scale           )
-		__field(        u64,    task_exec_scale)
-		__field(        int,    nr_running)
-	),
-
-	TP_fast_assign(
-		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
-		__entry->pid            = p->pid;
-		__entry->event  = event;
-		__entry->scale  = scale;
-		__entry->task_exec_scale        = task_exec_scale;
-		__entry->nr_running     = nr_running;
-	),
-
-	TP_printk("comm=%s pid=%d event=%d curr_window_scale=%llu task_exec_scale=%llu nr_running=%d",
-		__entry->comm, __entry->pid, __entry->event, __entry->scale, __entry->task_exec_scale, __entry->nr_running)
-);
-
-TRACE_EVENT(frame_info_tick,
-	TP_PROTO(struct task_struct *p, u64 timeline, u64 exec, unsigned long curr_load,
-	unsigned long vload, bool use_vload, unsigned int qos, unsigned long util),
-
-	TP_ARGS(p, timeline, exec, curr_load, vload, use_vload, qos, util),
-
-	TP_STRUCT__entry(
-		__array(        char,   comm,   TASK_COMM_LEN   )
-		__field(        pid_t,  pid                     )
-		__field(        u64,    timeline                )
-		__field(        u64,    exec            )
-		__field(        unsigned long,  curr_load)
-		__field(        unsigned long,  vload)
-		__field(        int,    use_vload)
-		__field(        unsigned int, qos)
-		__field(        unsigned long, util)
-	),
-
-	TP_fast_assign(
-		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
-		__entry->pid            = p->pid;
-		__entry->timeline       = timeline;
-		__entry->exec   = exec;
-		__entry->curr_load      = curr_load;
-		__entry->vload  = vload;
-		__entry->use_vload      = use_vload;
-		__entry->qos    = qos;
-		__entry->util   = util;
-	),
-
-	TP_printk("comm=%s pid=%d timeline=%llu exec=%llu curr_load=%lu vload=%lu use_vload=%d qos=%u util=%lu",
-		__entry->comm, __entry->pid, __entry->timeline, __entry->exec, __entry->curr_load, __entry->vload,
-		__entry->use_vload, __entry->qos, __entry->util)
-);
-
-TRACE_EVENT(sched_boost_task,
-	TP_PROTO(struct task_struct *p, unsigned long util, unsigned long margin),
-
-	TP_ARGS(p, util, margin),
-
-	TP_STRUCT__entry(
-		__array(char,                   comm, TASK_COMM_LEN)
-		__field(pid_t,                  pid)
-		__field(unsigned long,            util)
-		__field(unsigned long,            margin)
-	),
-
-	TP_fast_assign(
-		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
-		__entry->pid            = p->pid;
-		__entry->util            = util;
-		__entry->margin            = margin;
-	),
-
-	TP_printk("comm=%s pid=%d util=%llu margin=%llu",
-	__entry->comm, __entry->pid, __entry->util, __entry->margin)
-);
-
-TRACE_EVENT(select_fbg_cpu,
-
-	TP_PROTO(struct task_struct *p, bool full_boost, bool launch, bool target, int cpu),
-
-	TP_ARGS(p, full_boost, launch, target, cpu),
-
-	TP_STRUCT__entry(
-		__array(char,                   comm, TASK_COMM_LEN)
-		__field(pid_t,                  pid)
-		__field(int,            full_boost)
-		__field(int,            launch)
-		__field(int,            target)
-		__field(int,            cpu)
-	),
-
-	TP_fast_assign(
-		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
-		__entry->pid            = p->pid;
-		__entry->full_boost            = full_boost;
-		__entry->launch            = launch;
-		__entry->target           = target;
-		__entry->cpu           = cpu;
-	),
-
-	TP_printk("pid=%d comm=%s full_boost=%d launch=%d target=%d cpu=%d",
-	__entry->pid, __entry->comm, __entry->full_boost, __entry->launch, __entry->target, __entry->cpu)
-);
-
-TRACE_EVENT(frame_status,
-	TP_PROTO(unsigned long frame_util),
-
-	TP_ARGS(frame_util),
-
-	TP_STRUCT__entry(
-		__field(unsigned long,            frame_util)
-	),
-
-	TP_fast_assign(
-		__entry->frame_util           = frame_util;
-	),
-
-	TP_printk("frame_util=%lu", __entry->frame_util)
-);
-#endif
 #endif /* _TRACE_WALT_H */
 
 #undef TRACE_INCLUDE_PATH

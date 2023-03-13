@@ -38,7 +38,11 @@ void walt_init_topapp_tg(struct task_group *tg)
 
 	wtg = (struct walt_task_group *) tg->android_vendor_data1;
 
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
+	/*
+	 *TODO:both enable colocate & frame boost, we should disable
+	 *colocate in next version
+	 */
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
 	wtg->colocate = false;
 #else
 	wtg->colocate = true;

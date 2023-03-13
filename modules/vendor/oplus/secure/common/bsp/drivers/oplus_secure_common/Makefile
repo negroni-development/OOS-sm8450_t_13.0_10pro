@@ -7,3 +7,7 @@ endif
 ifneq ($(TARGET_PRODUCT),qssi)
 obj-$(CONFIG_OPLUS_SECURE_COMMON)     +=  oplus_secure_common.o
 endif
+
+ifeq ($(CONFIG_QCOM_QSEELOG_ENCRYPT),y)
+ccflags-y += -DQCOM_QSEELOG_ENCRYPT
+endif

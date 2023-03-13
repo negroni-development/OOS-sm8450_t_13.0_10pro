@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -25,8 +26,12 @@ static int cam_sensor_update_req_mgr(
 	memset(&add_req, 0, sizeof(add_req));
 	add_req.link_hdl = s_ctrl->bridge_intf.link_hdl;
 	add_req.req_id = csl_packet->header.request_id;
-	CAM_DBG(CAM_SENSOR, " Rxed Req Id: %llu",
-		csl_packet->header.request_id);
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	//lanhe add
+	add_req.use_rdi_sof_apply = s_ctrl->use_rdi_sof_apply;
+#endif
+	CAM_DBG(CAM_SENSOR, " Rxed Req Id: %llu rdi:%d",
+		csl_packet->header.request_id, add_req.use_rdi_sof_apply);
 	add_req.dev_hdl = s_ctrl->bridge_intf.device_hdl;
 	if (s_ctrl->bridge_intf.crm_cb &&
 		s_ctrl->bridge_intf.crm_cb->add_req) {
@@ -486,7 +491,7 @@ int32_t cam_handle_cmd_buffers_for_probe(void *cmd_buf,
 	struct cam_sensor_ctrl_t *s_ctrl,
 	int32_t cmd_buf_num, uint32_t cmd,
 	uint32_t cmd_buf_length, size_t remain_len,
-	uint32_t probe_ver)
+	uint32_t probe_ver, struct cam_cmd_buf_desc *cmd_desc)
 {
 	int32_t rc = 0;
 	size_t required_size = 0;
@@ -544,6 +549,44 @@ int32_t cam_handle_cmd_buffers_for_probe(void *cmd_buf,
 		}
 	}
 		break;
+
+	case 2: {
+		struct i2c_settings_array *i2c_reg_settings = NULL;
+		struct i2c_data_settings *i2c_data = NULL;
+		struct cam_buf_io_cfg *io_cfg = NULL;
+
+		CAM_DBG(CAM_SENSOR, "reg_bank unlock settings");
+		i2c_data = &(s_ctrl->i2c_data);
+		i2c_reg_settings = &i2c_data->reg_bank_unlock_settings;
+		i2c_reg_settings->request_id = 0;
+		rc = cam_sensor_i2c_command_parser(&s_ctrl->io_master_info,
+				i2c_reg_settings, cmd_desc, 1, io_cfg);
+		if (rc < 0) {
+			CAM_ERR(CAM_SENSOR,
+				"Failed in updating reg_bank unlock settings");
+			return rc;
+		}
+	}
+		break;
+	case 3: {
+		struct i2c_settings_array *i2c_reg_settings = NULL;
+		struct i2c_data_settings *i2c_data = NULL;
+		struct cam_buf_io_cfg *io_cfg = NULL;
+
+		CAM_DBG(CAM_SENSOR, "reg_bank lock settings");
+		i2c_data = &(s_ctrl->i2c_data);
+		i2c_reg_settings = &i2c_data->reg_bank_lock_settings;
+		i2c_reg_settings->request_id = 0;
+		rc = cam_sensor_i2c_command_parser(&s_ctrl->io_master_info,
+				i2c_reg_settings, cmd_desc, 1, io_cfg);
+		if (rc < 0) {
+			CAM_ERR(CAM_SENSOR,
+				"Failed in updating reg_bank lock settings");
+			return rc;
+		}
+	}
+		break;
+
 	default:
 		CAM_ERR(CAM_SENSOR, "Invalid command buffer");
 		break;
@@ -593,12 +636,6 @@ int32_t cam_handle_mem_ptr(uint64_t handle, uint32_t cmd,
 		rc = -EINVAL;
 		goto end;
 	}
-	if (pkt->num_cmd_buf != 2) {
-		CAM_ERR(CAM_SENSOR, "Expected More Command Buffers : %d",
-			 pkt->num_cmd_buf);
-		rc = -EINVAL;
-		goto end;
-	}
 
 	probe_ver = pkt->header.op_code & 0xFFFFFF;
 	CAM_DBG(CAM_SENSOR, "Received Header opcode: %u", probe_ver);
@@ -631,7 +668,8 @@ int32_t cam_handle_mem_ptr(uint64_t handle, uint32_t cmd,
 		ptr = (void *) cmd_buf;
 
 		rc = cam_handle_cmd_buffers_for_probe(ptr, s_ctrl,
-			i, cmd, cmd_desc[i].length, remain_len, probe_ver);
+			i, cmd, cmd_desc[i].length, remain_len, probe_ver, &cmd_desc[i]);
+
 		if (rc < 0) {
 			CAM_ERR(CAM_SENSOR,
 				"Failed to parse the command Buffer Header");
@@ -793,6 +831,13 @@ int cam_sensor_match_id(struct cam_sensor_ctrl_t *s_ctrl)
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
         rc = cam_sensor_match_id_oem(s_ctrl,chipid);
 #endif
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (slave_info->sensor_id == 0x0471) {
+		oplus_sensor_sony_get_dpc_data(s_ctrl);
+	}
+#endif
+
 	return rc;
 }
 
@@ -806,6 +851,9 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 	struct timespec64 ts;
 	uint64_t ms, sec, min, hrs;
 	char trace[64] = {0};
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+        int32_t sensor_temp;
+#endif
 
 	if (!s_ctrl || !arg) {
 		CAM_ERR(CAM_SENSOR, "s_ctrl is NULL");
@@ -869,21 +917,12 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			goto free_power_settings;
 		}
 
-		if (s_ctrl->is_aon_user) {
-			CAM_DBG(CAM_SENSOR,
-				"Setup for Main Camera with csiphy index: %d",
-				s_ctrl->sensordata->subdev_id[SUB_MODULE_CSIPHY]);
-			rc = cam_sensor_util_aon_ops(true,
-				s_ctrl->sensordata->subdev_id[SUB_MODULE_CSIPHY]);
-			if (rc) {
-				CAM_WARN(CAM_SENSOR,
-					"Main camera access operation is not successful rc: %d",
-					rc);
-				goto free_power_settings;
-			}
-		}
-
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
+		if(s_ctrl->sensordata->slave_info.sensor_id == 0x709 && cam_aon_if_do())
+		{
+			CAM_INFO(CAM_SENSOR,"before probe imx709 close aon");
+			cam_aon_irq_power_down(s_ctrl);
+		}
 		mutex_lock(&(s_ctrl->sensor_power_state_mutex));
 		if(s_ctrl->sensor_power_state == CAM_SENSOR_POWER_OFF)
 		{
@@ -928,6 +967,21 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			goto free_power_settings;
 		}
 #endif
+		if (s_ctrl->i2c_data.reg_bank_unlock_settings.is_settings_valid) {
+			rc = cam_sensor_apply_settings(s_ctrl, 0,
+				CAM_SENSOR_PACKET_OPCODE_SENSOR_REG_BANK_UNLOCK);
+			if (rc < 0) {
+				CAM_ERR(CAM_SENSOR, "REG_bank unlock failed");
+				goto free_power_settings;
+			}
+			rc = delete_request(&(s_ctrl->i2c_data.reg_bank_unlock_settings));
+			if (rc < 0) {
+				CAM_ERR(CAM_SENSOR,
+					"failed while deleting REG_bank unlock settings");
+				goto free_power_settings;
+			}
+		}
+
 		/* Match sensor ID */
 		rc = cam_sensor_match_id(s_ctrl);
 		if (rc < 0) {
@@ -943,7 +997,9 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			CAM_INFO(CAM_SENSOR, "sensor power down!");
 			msleep(20);
 			s_ctrl->sensor_power_state = CAM_SENSOR_POWER_OFF;
+			mutex_lock(&(s_ctrl->sensor_initsetting_mutex));
 			s_ctrl->sensor_initsetting_state = CAM_SENSOR_SETTING_WRITE_INVALID;
+			mutex_unlock(&(s_ctrl->sensor_initsetting_mutex));
 			mutex_unlock(&(s_ctrl->sensor_power_state_mutex));
 			goto free_power_settings;
 #else
@@ -951,6 +1007,21 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			msleep(20);
 			goto free_power_settings;
 #endif
+		}
+
+		if (s_ctrl->i2c_data.reg_bank_lock_settings.is_settings_valid) {
+			rc = cam_sensor_apply_settings(s_ctrl, 0,
+				CAM_SENSOR_PACKET_OPCODE_SENSOR_REG_BANK_LOCK);
+			if (rc < 0) {
+				CAM_ERR(CAM_SENSOR, "REG_bank lock failed");
+				goto free_power_settings;
+			}
+			rc = delete_request(&(s_ctrl->i2c_data.reg_bank_lock_settings));
+			if (rc < 0) {
+				CAM_ERR(CAM_SENSOR,
+					"failed while deleting REG_bank lock settings");
+				goto free_power_settings;
+			}
 		}
 
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
@@ -970,8 +1041,10 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 				CAM_INFO(CAM_SENSOR, "success in %s sensor Power Down",
 					s_ctrl->sensor_name);
 				s_ctrl->sensor_power_state = CAM_SENSOR_POWER_OFF;
+				mutex_lock(&(s_ctrl->sensor_initsetting_mutex));
 				s_ctrl->sensor_initsetting_state = CAM_SENSOR_SETTING_WRITE_INVALID;
-			}
+				mutex_unlock(&(s_ctrl->sensor_initsetting_mutex));
+			 }
 		}
 		else
 		{
@@ -986,19 +1059,6 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			goto free_power_settings;
 		}
 #endif
-		if (s_ctrl->is_aon_user) {
-			CAM_DBG(CAM_SENSOR,
-				"Setup for AON FW with csiphy index: %d",
-				s_ctrl->sensordata->subdev_id[SUB_MODULE_CSIPHY]);
-			rc = cam_sensor_util_aon_ops(false,
-				s_ctrl->sensordata->subdev_id[SUB_MODULE_CSIPHY]);
-			if (rc) {
-				CAM_WARN(CAM_SENSOR,
-					"AON FW access operation is not successful rc: %d",
-					rc);
-				goto free_power_settings;
-			}
-		}
 
 		/*
 		 * Set probe succeeded flag to 1 so that no other camera shall
@@ -1053,6 +1113,11 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 
 		sensor_acq_dev.device_handle =
 			cam_create_device_hdl(&bridge_params);
+		if (sensor_acq_dev.device_handle <= 0) {
+			rc = -EFAULT;
+			CAM_ERR(CAM_SENSOR, "Can not create device handle");
+			goto release_mutex;
+		}
 		s_ctrl->bridge_intf.device_hdl = sensor_acq_dev.device_handle;
 		s_ctrl->bridge_intf.session_hdl = sensor_acq_dev.session_handle;
 
@@ -1098,6 +1163,15 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			CAM_ERR(CAM_SENSOR, "sensor have power up!");
 		}
 		mutex_unlock(&(s_ctrl->sensor_power_state_mutex));
+		//lanhe add
+		if(sensor_acq_dev.reserved != 0)
+		{
+			s_ctrl->use_rdi_sof_apply = true;
+		}
+		else
+		{
+			s_ctrl->use_rdi_sof_apply = false;
+		}
 		oplus_cam_sensor_update_setting(s_ctrl);
 #else
 		rc = cam_sensor_power_up(s_ctrl);
@@ -1163,16 +1237,16 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 					s_ctrl->sensordata->slave_info.sensor_id,
 					s_ctrl->sensordata->slave_info.sensor_slave_addr
 					);
-				s_ctrl->sensor_power_state = CAM_SENSOR_POWER_OFF;
-				mutex_lock(&(s_ctrl->sensor_initsetting_mutex));
-				s_ctrl->sensor_initsetting_state = CAM_SENSOR_SETTING_WRITE_INVALID;
-				mutex_unlock(&(s_ctrl->sensor_initsetting_mutex));
 			}
 		}
 		else
 		{
 			CAM_ERR(CAM_SENSOR, "sensor have power down!");
 		}
+		s_ctrl->sensor_power_state = CAM_SENSOR_POWER_OFF;
+		mutex_lock(&(s_ctrl->sensor_initsetting_mutex));
+		s_ctrl->sensor_initsetting_state = CAM_SENSOR_SETTING_WRITE_INVALID;
+		mutex_unlock(&(s_ctrl->sensor_initsetting_mutex));
 		mutex_unlock(&(s_ctrl->sensor_power_state_mutex));
 #else
 		rc = cam_sensor_power_down(s_ctrl);
@@ -1353,6 +1427,10 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		if (s_ctrl->i2c_data.init_settings.is_settings_valid &&
 			(s_ctrl->i2c_data.init_settings.request_id == 0)) {
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+			oplus_shift_sensor_mode(s_ctrl);
+#endif
+
 			pkt_opcode =
 				CAM_SENSOR_PACKET_OPCODE_SENSOR_INITIAL_CONFIG;
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
@@ -1406,12 +1484,6 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 				delete_request(&s_ctrl->i2c_data.init_settings);
 				goto release_mutex;
 			}
-
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
-			mutex_lock(&(s_ctrl->sensor_initsetting_mutex));
-			s_ctrl->sensor_initsetting_state = CAM_SENSOR_SETTING_WRITE_SUCCESS;
-			mutex_unlock(&(s_ctrl->sensor_initsetting_mutex));
-#endif
 
 			rc = delete_request(&s_ctrl->i2c_data.init_settings);
 			if (rc < 0) {
@@ -1469,7 +1541,8 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 	}
 		break;
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
-	case CAM_OEM_GET_ID:{
+	case CAM_OEM_GET_ID:
+	case CAM_GET_DPC_DATA: {
 		rc = oplus_cam_sensor_driver_cmd(s_ctrl, arg);
 		if (rc < 0) {
 			CAM_ERR(CAM_SENSOR, "oplus cmd failed");
@@ -1477,6 +1550,24 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		}
 	}
 		break;
+#endif
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	case CAM_OEM_GET_SENSOR_THERMAL_DATA: {
+
+		rc = oplus_cam_get_sensor_temp(s_ctrl, &sensor_temp);
+		if (rc < 0)
+		{
+			CAM_ERR(CAM_SENSOR, "oplus cmd failed");
+			goto release_mutex;
+		}
+		rc = copy_to_user(u64_to_user_ptr(cmd->handle), &sensor_temp, sizeof(int32_t));
+		if (rc) {
+			CAM_ERR(CAM_SENSOR, "Failed Copy to User");
+			rc = -EFAULT;
+			goto release_mutex;
+		}
+	}
+	break;
 #endif
 	default:
 		CAM_ERR(CAM_SENSOR, "%s: Invalid Opcode: %d",
@@ -1523,7 +1614,13 @@ int cam_sensor_publish_dev_info(struct cam_req_mgr_device_info *info)
 	else
 		info->p_delay = 2;
 	info->trigger = CAM_TRIGGER_POINT_SOF;
-
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	//lanhe add
+	if(s_ctrl->use_rdi_sof_apply == true)
+	{
+		info->trigger = CAM_TRIGGER_POINT_RDI_SOF;
+	}
+#endif
 	return rc;
 }
 
@@ -1601,14 +1698,14 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 
 	trace_begin("%d_%d_0x%x aon user", s_ctrl->cci_num, s_ctrl->cci_i2c_master, s_ctrl->sensordata->slave_info.sensor_id);
 	if (s_ctrl->is_aon_user) {
-		CAM_DBG(CAM_SENSOR,
+		CAM_INFO(CAM_SENSOR,
 			"Setup for Main Camera with csiphy index: %d",
 			s_ctrl->sensordata->subdev_id[SUB_MODULE_CSIPHY]);
 		rc = cam_sensor_util_aon_ops(true,
 			s_ctrl->sensordata->subdev_id[SUB_MODULE_CSIPHY]);
 		if (rc) {
-			CAM_WARN(CAM_SENSOR,
-				"Main camera access opertion is not successful rc: %d",
+			CAM_ERR(CAM_SENSOR,
+				"Main camera access operation is not successful rc: %d",
 				rc);
 			trace_end();
 			return rc;
@@ -1635,6 +1732,7 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 	trace_end();
 
 	return rc;
+
 cci_failure:
 	if (cam_sensor_util_power_down(power_info, soc_info))
 		CAM_ERR(CAM_SENSOR, "power down failure");
@@ -1670,6 +1768,63 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 		return rc;
 	}
 
+	if (s_ctrl->is_aon_user) {
+		CAM_INFO(CAM_SENSOR,
+			"Setup for AON FW with csiphy index: %d",
+			s_ctrl->sensordata->subdev_id[SUB_MODULE_CSIPHY]);
+		rc = cam_sensor_util_aon_ops(false,
+			s_ctrl->sensordata->subdev_id[SUB_MODULE_CSIPHY]);
+		if (rc) {
+			CAM_ERR(CAM_SENSOR,
+				"AON FW access operation is not successful rc: %d",
+				rc);
+			return rc;
+		}
+	}
+
+	if (s_ctrl->bob_pwm_switch) {
+		rc = cam_sensor_bob_pwm_mode_switch(soc_info,
+			s_ctrl->bob_reg_index, false);
+		if (rc) {
+			CAM_WARN(CAM_SENSOR,
+				"%s BoB PWM setup failed rc: %d",
+				s_ctrl->sensor_name, rc);
+			rc = 0;
+		}
+	}
+
+	camera_io_release(&(s_ctrl->io_master_info));
+
+	return rc;
+}
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+int cam_sensor_power_down_except_sensor(struct cam_sensor_ctrl_t *s_ctrl)
+{
+	struct cam_sensor_power_ctrl_t *power_info;
+	struct cam_hw_soc_info *soc_info;
+	int rc = 0;
+
+	if (!s_ctrl) {
+		CAM_ERR(CAM_SENSOR, "failed: s_ctrl %pK", s_ctrl);
+		return -EINVAL;
+	}
+
+	power_info = &s_ctrl->sensordata->power_info;
+	soc_info = &s_ctrl->soc_info;
+
+	if (!power_info) {
+		CAM_ERR(CAM_SENSOR, "failed: %s power_info %pK",
+			s_ctrl->sensor_name, power_info);
+		return -EINVAL;
+	}
+
+	rc = cam_sensor_util_power_down_except_sensor(power_info, soc_info);
+	if (rc < 0) {
+		CAM_ERR(CAM_SENSOR, "%s core power down failed:%d",
+			s_ctrl->sensor_name, rc);
+		return rc;
+	}
+
 	if (s_ctrl->bob_pwm_switch) {
 		rc = cam_sensor_bob_pwm_mode_switch(soc_info,
 			s_ctrl->bob_reg_index, false);
@@ -1686,6 +1841,63 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 	return rc;
 }
 
+int cam_sensor_power_down_only_sensor(struct cam_sensor_ctrl_t *s_ctrl)
+{
+	struct cam_sensor_power_ctrl_t *power_info;
+	struct cam_hw_soc_info *soc_info;
+	int rc = 0;
+
+	if (!s_ctrl) {
+		CAM_ERR(CAM_SENSOR, "failed: s_ctrl %pK", s_ctrl);
+		return -EINVAL;
+	}
+
+	power_info = &s_ctrl->sensordata->power_info;
+	soc_info = &s_ctrl->soc_info;
+
+	if (!power_info) {
+		CAM_ERR(CAM_SENSOR, "failed: %s power_info %pK",
+			s_ctrl->sensor_name, power_info);
+		return -EINVAL;
+	}
+
+	rc = cam_sensor_util_power_down_only_sensor(power_info, soc_info);
+	if (rc < 0) {
+		CAM_ERR(CAM_SENSOR, "%s core power down failed:%d",
+			s_ctrl->sensor_name, rc);
+		return rc;
+	}
+
+	if (s_ctrl->is_aon_user) {
+		CAM_INFO(CAM_SENSOR,
+			"Setup for AON FW with csiphy index: %d",
+			s_ctrl->sensordata->subdev_id[SUB_MODULE_CSIPHY]);
+		rc = cam_sensor_util_aon_ops(false,
+			s_ctrl->sensordata->subdev_id[SUB_MODULE_CSIPHY]);
+		if (rc) {
+			CAM_ERR(CAM_SENSOR,
+				"AON FW access operation is not successful rc: %d",
+				rc);
+			return rc;
+		}
+	}
+
+	if (s_ctrl->bob_pwm_switch) {
+		rc = cam_sensor_bob_pwm_mode_switch(soc_info,
+			s_ctrl->bob_reg_index, false);
+		if (rc) {
+			CAM_WARN(CAM_SENSOR,
+				"%s BoB PWM setup failed rc: %d",
+				s_ctrl->sensor_name, rc);
+			rc = 0;
+		}
+	}
+
+	//camera_io_release(&(s_ctrl->io_master_info));
+
+	return rc;
+}
+#endif
 int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 	uint64_t req_id, enum cam_sensor_packet_opcodes opcode)
 {
@@ -1720,6 +1932,14 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 		}
 		case CAM_SENSOR_PACKET_OPCODE_SENSOR_STREAMOFF: {
 			i2c_set = &s_ctrl->i2c_data.streamoff_settings;
+			break;
+		}
+		case CAM_SENSOR_PACKET_OPCODE_SENSOR_REG_BANK_UNLOCK: {
+			i2c_set = &s_ctrl->i2c_data.reg_bank_unlock_settings;
+			break;
+		}
+		case CAM_SENSOR_PACKET_OPCODE_SENSOR_REG_BANK_LOCK: {
+			i2c_set = &s_ctrl->i2c_data.reg_bank_lock_settings;
 			break;
 		}
 		case CAM_SENSOR_PACKET_OPCODE_SENSOR_UPDATE:
@@ -1817,6 +2037,12 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 		}
 	}
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if(opcode == CAM_SENSOR_PACKET_OPCODE_SENSOR_INITIAL_CONFIG)
+	{
+		s_ctrl->sensor_initsetting_state = CAM_SENSOR_SETTING_WRITE_SUCCESS;
+	}
+#endif
 	return rc;
 }
 
@@ -1837,8 +2063,8 @@ int32_t cam_sensor_apply_request(struct cam_req_mgr_apply_request *apply)
 		return -EINVAL;
 	}
 
-	CAM_DBG(CAM_REQ, " Sensor[%d] update req id: %lld",
-		s_ctrl->soc_info.index, apply->request_id);
+	CAM_DBG(CAM_REQ, "trigger_point:%d Sensor[%d] update req id: %lld",
+		apply->trigger_point, s_ctrl->soc_info.index, apply->request_id);
 	trace_cam_apply_req("Sensor", s_ctrl->soc_info.index, apply->request_id, apply->link_hdl);
 	mutex_lock(&(s_ctrl->cam_sensor_mutex));
 	rc = cam_sensor_apply_settings(s_ctrl, apply->request_id,

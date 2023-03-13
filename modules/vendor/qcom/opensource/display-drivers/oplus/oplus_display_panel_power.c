@@ -157,14 +157,14 @@ int oplus_display_panel_get_pwr(void *data)
 {
 	int ret = 0;
 	struct panel_vol_get *panel_vol = data;
-	u32 vol_id = (panel_vol->panel_id - 1);
-	pr_err("%s : [id] = %d\n", __func__, vol_id);
+	u32 vol_id = ((panel_vol->panel_id & 0x0F) - 1);
 
-	if (vol_id < 0) {
+	if (vol_id < 0 || vol_id >= PANEL_VOLTAGE_ID_MAX) {
 		pr_err("%s error id: [id] = %d\n", __func__, vol_id);
 		return -EINVAL;
 	}
 
+	pr_err("%s : [id] = %d\n", __func__, vol_id);
 	panel_vol->panel_min = panel_vol_bak[vol_id].voltage_min;
 	panel_vol->panel_max = panel_vol_bak[vol_id].voltage_max;
 	panel_vol->panel_cur = panel_vol_bak[vol_id].voltage_current;
@@ -198,13 +198,13 @@ int oplus_display_panel_set_pwr(void *data)
 	panel_vol_id = ((panel_vol->panel_id & 0x0F)-1);
 	panel_vol_value = panel_vol->panel_vol;
 
-	pr_err("debug for %s, id = %d value = %d\n",
-		__func__, panel_vol_id, panel_vol_value);
-
-	if (panel_vol_id < 0 || panel_vol_id > PANEL_VOLTAGE_ID_MAX) {
+	if (panel_vol_id < 0 || panel_vol_id >= PANEL_VOLTAGE_ID_MAX) {
+		pr_err("%s error id: [id] = %d\n", __func__, panel_vol_id);
 		return -EINVAL;
 	}
 
+	pr_err("debug for %s, id = %d value = %d\n",
+		__func__, panel_vol_id, panel_vol_value);
 	if (panel_vol_value < panel_vol_bak[panel_vol_id].voltage_min ||
 		panel_vol_id > panel_vol_bak[panel_vol_id].voltage_max)
 		return -EINVAL;

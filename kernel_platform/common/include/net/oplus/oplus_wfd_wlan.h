@@ -8,13 +8,11 @@
 **
 ** Version: 1.0
 ** Date :   2020-08-11
-** Author:  XiaZijian@CONNECTIVITY.WIFI.P2P.26106
 ** TAG  :   OPLUS_FEATURE_WIFI_OPLUSWFD
 **
 ** ---------------------Revision History: ---------------------
 **  <author>                      <data>     <version >   <desc>
 ** ---------------------------------------------------------------
-**  XiaZijian@CONNECTIVITY.WIFI.P2P.26106  2020/08/11  1.0      build this module
 **
 ************************************************************************************/
 

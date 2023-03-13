@@ -26,16 +26,11 @@
 #include <linux/cpufreq_health.h>
 #endif
 
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
-#include "tuning/frame_boost_group.h"
-#include "tuning/frame_info.h"
-#endif
-
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_GKI_CPUFREQ_BOUNCING)
 #include <linux/cpufreq_bouncing.h>
 #endif
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
-#include <../kernel/oplus_perf_sched/sched_assist/sa_fair.h>
+#include <../kernel/oplus_cpu/sched/sched_assist/sa_fair.h>
 #endif
 
 const char *task_event_names[] = {
@@ -399,8 +394,9 @@ update_window_start(struct rq *rq, u64 wallclock, int event)
 
 	delta = wallclock - wrq->window_start;
 	if (delta < 0) {
-		printk_deferred("WALT-BUG CPU%d; wallclock=%llu is lesser than window_start=%llu",
-				rq->cpu, wallclock, wrq->window_start);
+		printk_deferred("WALT-BUG CPU%d; wallclock=%llu(0x%llx) is lesser than window_start=%llu(0x%llx)",
+				rq->cpu, wallclock, wallclock,
+				wrq->window_start, wrq->window_start);
 		WALT_PANIC(1);
 	}
 	if (delta < sched_ravg_window)
@@ -516,7 +512,7 @@ unsigned int walt_big_tasks(int cpu)
 	return wrq->walt_stats.nr_big_tasks;
 }
 
-void clear_walt_request(int cpu)
+static void clear_walt_request(int cpu)
 {
 	struct rq *rq = cpu_rq(cpu);
 	unsigned long flags;
@@ -2041,9 +2037,6 @@ static u64 update_task_demand(struct task_struct *p, struct rq *rq,
 	int new_window, nr_full_windows;
 	u32 window_size = sched_ravg_window;
 	u64 runtime;
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
-	update_group_demand(p, rq, event, wallclock);
-#endif
 
 	new_window = mark_start < window_start;
 	if (!account_busy_for_task_demand(rq, p, event)) {
@@ -2160,9 +2153,9 @@ update_task_rq_cpu_cycles(struct task_struct *p, struct rq *rq, int event,
 			time_delta = wallclock - wts->mark_start;
 
 		if ((s64)time_delta < 0) {
-			printk_deferred("WALT-BUG pid=%u CPU%d wallclock=%llu < mark_start=%llu event=%d irqtime=%llu",
-					 p->pid, rq->cpu, wallclock,
-					 wts->mark_start, event, irqtime);
+			printk_deferred("WALT-BUG pid=%u CPU%d wallclock=%llu(0x%llx) < mark_start=%llu(0x%llx) event=%d irqtime=%llu",
+					 p->pid, rq->cpu, wallclock, wallclock,
+					 wts->mark_start, wts->mark_start, event, irqtime);
 			WALT_PANIC((s64)time_delta < 0);
 		}
 
@@ -2208,9 +2201,6 @@ static void walt_update_task_ravg(struct task_struct *p, struct rq *rq, int even
 	lockdep_assert_held(&rq->lock);
 
 	old_window_start = update_window_start(rq, wallclock, event);
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
-	update_group_nr_running(p, event, wallclock);
-#endif
 
 	if (!wts->mark_start) {
 		update_task_cpu_cycles(p, cpu_of(rq), wallclock);
@@ -2235,7 +2225,7 @@ done:
 	run_walt_irq_work(old_window_start, rq);
 }
 
-static void __sched_fork_init(struct task_struct *p)
+static inline void __sched_fork_init(struct task_struct *p)
 {
 	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
 
@@ -2261,11 +2251,6 @@ static void init_new_task_load(struct task_struct *p)
 	wts->init_load_pct = 0;
 	rcu_assign_pointer(wts->grp, NULL);
 	INIT_LIST_HEAD(&wts->grp_list);
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
-	rcu_assign_pointer(wts->fbg, NULL);
-	INIT_LIST_HEAD(&wts->fbg_list);
-	wts->fbg_depth = 0;
-#endif
 
 	wts->mark_start = 0;
 	wts->sum = 0;
@@ -2318,9 +2303,6 @@ static void init_existing_task_load(struct task_struct *p)
 static void walt_task_dead(struct task_struct *p)
 {
 	sched_set_group_id(p, 0);
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
-	sched_set_frame_boost_group(p, false);
-#endif
 }
 
 static void mark_task_starting(struct task_struct *p)
@@ -3724,6 +3706,7 @@ static void walt_sched_init_rq(struct rq *rq)
 	}
 	wrq->notif_pending = false;
 
+	wrq->num_mvp_tasks = 0;
 	INIT_LIST_HEAD(&wrq->mvp_tasks);
 }
 
@@ -3816,31 +3799,37 @@ static void walt_cpu_frequency_limits(void *unused, struct cpufreq_policy *polic
  */
 static void android_rvh_update_cpu_capacity(void *unused, int cpu, unsigned long *capacity)
 {
-	unsigned long max_capacity = arch_scale_cpu_capacity(cpu);
+	unsigned long fmax_capacity = arch_scale_cpu_capacity(cpu);
 	unsigned long thermal_pressure = arch_scale_thermal_pressure(cpu);
-	unsigned long thermal_cap;
+	unsigned long thermal_cap, old;
+	unsigned long rt_pressure = fmax_capacity - *capacity;
 	struct walt_sched_cluster *cluster;
-	unsigned long rt_pressure = max_capacity - *capacity;
+	struct rq *rq = cpu_rq(cpu);
 
 	if (unlikely(walt_disabled))
 		return;
 
 	/*
-	 * thermal_pressure = max_capacity - curr_cap_as_per_thermal.
+	 * thermal_pressure = cpu_scale - curr_cap_as_per_thermal.
 	 * so,
-	 * curr_cap_as_per_thermal = max_capacity - thermal_pressure.
+	 * curr_cap_as_per_thermal = cpu_scale - thermal_pressure.
 	 */
 
-	thermal_cap = max_capacity - thermal_pressure;
+	thermal_cap = fmax_capacity - thermal_pressure;
 
 	cluster = cpu_cluster(cpu);
-	/* reduce the max_capacity under cpufreq constraints */
+	/* reduce the fmax_capacity under cpufreq constraints */
 	if (cluster->max_freq != cluster->max_possible_freq)
-		max_capacity = mult_frac(max_capacity, cluster->max_freq,
+		fmax_capacity = mult_frac(fmax_capacity, cluster->max_freq,
 					 cluster->max_possible_freq);
 
-	cpu_rq(cpu)->cpu_capacity_orig = min(max_capacity, thermal_cap);
-	*capacity = cpu_rq(cpu)->cpu_capacity_orig - rt_pressure;
+	old = rq->cpu_capacity_orig;
+	rq->cpu_capacity_orig = min(fmax_capacity, thermal_cap);
+
+	if (old != rq->cpu_capacity_orig)
+		trace_update_cpu_capacity(cpu, rt_pressure, *capacity);
+
+	*capacity = max(rq->cpu_capacity_orig - rt_pressure, 1UL);
 }
 
 static void android_rvh_sched_cpu_starting(void *unused, int cpu)
@@ -4033,22 +4022,10 @@ static void android_rvh_try_to_wake_up(void *unused, struct task_struct *p)
 	u64 wallclock;
 	unsigned int old_load;
 	struct walt_related_thread_group *grp = NULL;
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
-	bool in_grp = false;
-	struct frame_boost_group *fbg = NULL;
-#endif
 
 	if (unlikely(walt_disabled))
 		return;
 
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
-	rcu_read_lock();
-	fbg = task_frame_boost_group(p);
-	rcu_read_unlock();
-	if (fbg) {
-		in_grp = true;
-	}
-#endif
 	rq_lock_irqsave(rq, &rf);
 	old_load = task_load(p);
 	wallclock = walt_ktime_get_ns();
@@ -4062,9 +4039,6 @@ static void android_rvh_try_to_wake_up(void *unused, struct task_struct *p)
 	if (update_preferred_cluster(grp, p, old_load, false))
 		set_preferred_cluster(grp);
 	rcu_read_unlock();
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
-	trace_sched_in_fbg(p, in_grp);
-#endif
 }
 
 static void android_rvh_try_to_wake_up_success(void *unused, struct task_struct *p)
@@ -4096,9 +4070,6 @@ static void android_rvh_tick_entry(void *unused, struct rq *rq)
 
 	if (is_ed_task_present(rq, wallclock, NULL))
 		waltgov_run_callback(rq, WALT_CPUFREQ_EARLY_DET);
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
-	sched_update_fbg_tick(rq->curr, wallclock);
-#endif
 }
 
 static void android_vh_scheduler_tick(void *unused, struct rq *rq)
@@ -4375,11 +4346,6 @@ static void walt_init(struct work_struct *work)
 	walt_rt_init();
 	walt_cfs_init();
 	walt_pause_init();
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
-	frame_boost_init();
-	frame_boost_group_init();
-	frame_info_init();
-#endif
 
 	stop_machine(walt_init_stop_handler, NULL, NULL);
 

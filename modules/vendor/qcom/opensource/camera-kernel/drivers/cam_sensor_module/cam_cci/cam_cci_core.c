@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -1417,7 +1418,7 @@ static int32_t cam_cci_read(struct v4l2_subdev *sd,
 		val = cam_io_r_mb(base +
 			CCI_I2C_M0_READ_BUF_LEVEL_ADDR + master * 0x100);
 		CAM_ERR(CAM_CCI,
-			"CCI%d_I2C_M%d_Q%d wait timeout rd_done for cci: %d, master: %d, queue: %d, FIFO buf_lvl: 0x%x, rc: %d",
+			"CCI%d_I2C_M%d_Q%d rd_done wait timeout FIFO buf_lvl: 0x%x, rc: %d",
 			cci_dev->soc_info.index, master, queue, val, rc);
 		cam_cci_flush_queue(cci_dev, master);
 		goto rel_mutex_q;
@@ -1913,8 +1914,8 @@ int32_t cam_cci_core_cfg(struct v4l2_subdev *sd,
 		return -EINVAL;
 	}
 
-	if (!cci_ctrl) {
-		CAM_ERR(CAM_CCI, "CCI%d_I2C_M%d CCI_CTRL IS NULL", cci_dev->soc_info.index, master);
+	if (!cci_ctrl || !cci_ctrl->cci_info) {
+		CAM_ERR(CAM_CCI, "CCI%d_I2C_M%d CCI_CTRL OR CCI_INFO IS NULL", cci_dev->soc_info.index, master);
 		return -EINVAL;
 	}
 

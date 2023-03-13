@@ -1101,13 +1101,13 @@
 		qupv3_se15_i3c_sleep: qupv3_se15_i3c_sleep {
 			mux {
 				pins = "gpio56", "gpio57";
-				function = "gpio";
+				function = "ibi_i3c";
 			};
 
 			config {
 				pins = "gpio56", "gpio57";
 				drive-strength = <2>;
-				bias-disable;
+				bias-pull-up;
 			};
 		};
 
@@ -1119,6 +1119,47 @@
 
 			config {
 				pins = "gpio56", "gpio57";
+				drive-strength = <2>;
+				bias-disable;
+			};
+		};
+	};
+
+	qupv3_se9_i3c_pins: qupv3_se9_i3c_pins {
+		qupv3_se9_i3c_active: qupv3_se9_i3c_active {
+			mux {
+				pins = "gpio32", "gpio33";
+				function = "ibi_i3c";
+			};
+
+			config {
+				pins = "gpio32", "gpio33";
+				drive-strength = <2>;
+				bias-pull-up;
+			};
+		};
+
+		qupv3_se9_i3c_sleep: qupv3_se9_i3c_sleep {
+			mux {
+				pins = "gpio32", "gpio33";
+				function = "ibi_i3c";
+			};
+
+			config {
+				pins = "gpio32", "gpio33";
+				drive-strength = <2>;
+				bias-pull-up;
+			};
+		};
+
+		qupv3_se9_i3c_disable: qupv3_se9_i3c_disable {
+			mux {
+				pins = "gpio32", "gpio33";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio32", "gpio33";
 				drive-strength = <2>;
 				bias-disable;
 			};
@@ -2467,7 +2508,6 @@
 		spkr_1_sd_n_sleep: spkr_1_sd_n_sleep {
 			mux {
 //#ifdef OPLUS_FEATURE_CHG_BASIC
-//lizhijie@BSP.CHG.Basic lzj add for chg temp
 //				pins = "gpio1";
 //#else
 				pins = "gpio9";
@@ -2477,7 +2517,6 @@
 
 			config {
 //#ifdef OPLUS_FEATURE_CHG_BASIC
-//lizhijie@BSP.CHG.Basic lzj add for chg temp
 //				pins = "gpio1";
 //#else
 				pins = "gpio9";
@@ -2491,7 +2530,6 @@
 		spkr_1_sd_n_active: spkr_1_sd_n_active {
 			mux {
 //#ifdef OPLUS_FEATURE_CHG_BASIC
-//lizhijie@BSP.CHG.Basic lzj add for chg temp
 //				pins = "gpio1";
 //#else
 				pins = "gpio9";
@@ -2501,7 +2539,6 @@
 
 			config {
 //#ifdef OPLUS_FEATURE_CHG_BASIC
-//lizhijie@BSP.CHG.Basic lzj add for chg temp
 //				pins = "gpio1";
 //#else
 				pins = "gpio9";
@@ -2660,7 +2697,7 @@
 		};
 	};
 
-	cnss_pins {
+	cnss_pins: cnss_pins {
 		cnss_wlan_en_active: cnss_wlan_en_active {
 			mux {
 				pins = "gpio80";
@@ -2798,11 +2835,64 @@
 		};
 	};
 
+	pcie_ep {
+		pcie_ep_perst_default: pcie_ep_perst_default {
+			mux {
+				pins = "gpio97";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio97";
+				drive-strength = <2>;
+				bias-pull-down;
+			};
+		};
+
+		pcie_ep_clkreq_default: pcie_ep_clkreq_default {
+			mux {
+				pins = "gpio98";
+				function = "pcie1_clkreqn";
+			};
+
+			config {
+				pins = "gpio98";
+				drive-strength = <2>;
+				bias-pull-up;
+			};
+		};
+
+		pcie_ep_wake_default: pcie_ep_wake_default {
+			mux {
+				pins = "gpio99";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio99";
+				drive-strength = <2>;
+				bias-pull-up;
+			};
+		};
+
+		pcie_ep_clkreq_sleep: pcie_ep_clkreq_sleep {
+			mux {
+				pins = "gpio98";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio98";
+				drive-strength = <2>;
+				bias-pull-up;
+			};
+		};
+	};
+
 	pmx_sde: pmx_sde {
 		sde_dsi_active: sde_dsi_active {
 			mux {
 //#ifdef OPLUS_FEATURE_CHG_BASIC
-//lizhijie@BSP.CHG.Basic lzj add for chg temp
 //				pins = "gpio0";
 //#else
 				pins = "gpio13";
@@ -2812,7 +2902,6 @@
 
 			config {
 //#ifdef OPLUS_FEATURE_CHG_BASIC
-//lizhijie@BSP.CHG.Basic lzj add for chg temp
 //				pins = "gpio0";
 //#else
 				pins = "gpio13";
@@ -2825,7 +2914,6 @@
 		sde_dsi_suspend: sde_dsi_suspend {
 			mux {
 //#ifdef OPLUS_FEATURE_CHG_BASIC
-//lizhijie@BSP.CHG.Basic lzj add for chg temp
 //				pins = "gpio0";
 //#else
 				pins = "gpio13";
@@ -2835,7 +2923,6 @@
 
 			config {
 //#ifdef OPLUS_FEATURE_CHG_BASIC
-//lizhijie@BSP.CHG.Basic lzj add for chg temp
 //				pins = "gpio0";
 //#else
 				pins = "gpio13";

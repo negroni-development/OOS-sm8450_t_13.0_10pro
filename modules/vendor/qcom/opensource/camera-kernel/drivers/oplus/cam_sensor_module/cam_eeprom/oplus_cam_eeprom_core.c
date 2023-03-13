@@ -400,29 +400,40 @@ int32_t EEPROM_CommonWrite(struct cam_eeprom_ctrl_t *e_ctrl,
 	//disable write protection
 	if (cam_write_eeprom->isWRP == 0x01) {
 		i2c_reg_settings.size = 1;
-		if (strcmp(cam_write_eeprom->eepromName, "imx766_gt24p256c_main") == 0) {
+		if (strcmp(cam_write_eeprom->eepromName, "imx766_gt24p256c_main") == 0){
 			i2c_reg_array.reg_addr = 0xE000;
 			i2c_reg_array.reg_data = 0xA2;
+		} else if ((strcmp(cam_write_eeprom->eepromName, "imx766_gt24p256c_tele") == 0)
+            || (strcmp(cam_write_eeprom->eepromName, "imx709_p24l128g") == 0)) {
+			i2c_reg_array.reg_addr = 0xE000;
+			i2c_reg_array.reg_data = 0xA0;
 		} else if ((strcmp(cam_write_eeprom->eepromName, "imx766_p24c256c_wide") == 0)
-                 ||(strcmp(cam_write_eeprom->eepromName, "ov08a10_gt24p128e") == 0)) {
+			||(strcmp(cam_write_eeprom->eepromName, "ov08a10_gt24p128e") == 0)
+			||(strcmp(cam_write_eeprom->eepromName, "imx766_p24c256c_main") == 0)
+			||(strcmp(cam_write_eeprom->eepromName, "ov08d_gt24p128_sunny") == 0)
+			||(strcmp(cam_write_eeprom->eepromName, "imx766_gt24p128c2csli") == 0)
+			||(strcmp(cam_write_eeprom->eepromName, "unicorn_imx766_main_gt24p256c") == 0)) {
 			i2c_reg_array.reg_addr = 0xA000;
 			i2c_reg_array.reg_data = 0x00;
 		} else if (strcmp(cam_write_eeprom->eepromName, "imx789_p24c128e") == 0) {
 			i2c_reg_array.reg_addr = 0x8000;
 			i2c_reg_array.reg_data = 0x06;
+		} else if ((strcmp(cam_write_eeprom->eepromName, "unicorn_imx709_tele_gt24p64ba8") == 0)
+            ||(strcmp(cam_write_eeprom->eepromName, "imx581_p24c128e_wide") == 0)) {
+			i2c_reg_array.reg_addr = 0x8000;
+			i2c_reg_array.reg_data = 0x00;
 		} else {
 			i2c_reg_array.reg_addr = cam_write_eeprom->WRPaddr;
 			i2c_reg_array.reg_data = 0x00;
 		}
 		i2c_reg_array.delay = 0;
-
 		i2c_reg_settings.reg_setting = &i2c_reg_array;
 
 		rc = camera_io_dev_read(&e_ctrl->io_master_info,
 			 i2c_reg_array.reg_addr, &readcalibData,
 			 CAMERA_SENSOR_I2C_TYPE_WORD,
 			 CAMERA_SENSOR_I2C_TYPE_BYTE);
-			 CAM_ERR(CAM_EEPROM, "cam: WRPaddr: 0x%x", readcalibData);
+			 CAM_ERR(CAM_EEPROM, "cam_write_eeprom->eepromName :%s  set reg_data:0x%x cam reg_addr:0x%x, WRPaddr: 0x%x",  cam_write_eeprom->eepromName,i2c_reg_array.reg_data,i2c_reg_array.reg_addr,readcalibData);
 		if (rc) {
 			CAM_ERR(CAM_EEPROM, "read WRPaddr failed rc %d",rc);
 			return rc;
@@ -476,13 +487,25 @@ int32_t EEPROM_CommonWrite(struct cam_eeprom_ctrl_t *e_ctrl,
 		if (strcmp(cam_write_eeprom->eepromName, "imx766_gt24p256c_main") == 0) {
 			i2c_reg_array.reg_addr = 0xE000;
 			i2c_reg_array.reg_data = 0xA3;
+		} else if ((strcmp(cam_write_eeprom->eepromName, "imx766_gt24p256c_tele") == 0)
+            || (strcmp(cam_write_eeprom->eepromName, "imx709_p24l128g") == 0)) {
+			i2c_reg_array.reg_addr = 0xE000;
+			i2c_reg_array.reg_data = 0xA1;
 		} else if ((strcmp(cam_write_eeprom->eepromName, "imx766_p24c256c_wide") == 0)
-                 ||(strcmp(cam_write_eeprom->eepromName, "ov08a10_gt24p128e") == 0)){
+			||(strcmp(cam_write_eeprom->eepromName, "ov08a10_gt24p128e") == 0)
+			||(strcmp(cam_write_eeprom->eepromName, "imx766_p24c256c_main") == 0)
+			||(strcmp(cam_write_eeprom->eepromName, "ov08d_gt24p128_sunny") == 0)
+			||(strcmp(cam_write_eeprom->eepromName, "imx766_gt24p128c2csli") == 0)
+			||(strcmp(cam_write_eeprom->eepromName, "unicorn_imx766_main_gt24p256c") == 0)){
 			i2c_reg_array.reg_addr = 0xA000;
 			i2c_reg_array.reg_data = 0x0E;
-		} else if (strcmp(cam_write_eeprom->eepromName, "imx789_p24c128e") == 0) {
+		} else if ((strcmp(cam_write_eeprom->eepromName, "imx789_p24c128e") == 0)
+            ||(strcmp(cam_write_eeprom->eepromName, "imx581_p24c128e_wide") == 0)) {
 			i2c_reg_array.reg_addr = 0x8000;
 			i2c_reg_array.reg_data = 0x0E;
+		} else if (strcmp(cam_write_eeprom->eepromName, "unicorn_imx709_tele_gt24p64ba8") == 0) {
+			i2c_reg_array.reg_addr = 0x8000;
+			i2c_reg_array.reg_data = 0x01;
 		} else {
 			i2c_reg_array.reg_addr = cam_write_eeprom->WRPaddr;
 			i2c_reg_array.reg_data = 0x0E;

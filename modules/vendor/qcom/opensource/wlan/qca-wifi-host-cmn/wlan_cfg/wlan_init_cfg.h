@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -33,11 +33,7 @@
 #define WLAN_CFG_INT_NUM_CONTEXTS 18
 #define WLAN_CFG_INT_NUM_CONTEXTS_MAX 18
 #else
-#if defined(TX_MULTI_TCL)
-#define WLAN_CFG_INT_NUM_CONTEXTS 9
-#else
 #define WLAN_CFG_INT_NUM_CONTEXTS 7
-#endif
 #define WLAN_CFG_INT_NUM_CONTEXTS_MAX 14
 #endif
 #define WLAN_CFG_RXDMA1_ENABLE 1
@@ -73,7 +69,7 @@
 
 /* Tx configuration */
 #define MAX_LINK_DESC_BANKS 8
-#define MAX_TXDESC_POOLS 4
+#define MAX_TXDESC_POOLS 6
 
 /* Rx configuration */
 #define MAX_RXDESC_POOLS 4

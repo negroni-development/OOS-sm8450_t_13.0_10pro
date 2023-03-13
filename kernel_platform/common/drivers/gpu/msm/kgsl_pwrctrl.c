@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+ * Copyright (c) 2010-2021, The Linux Foundation. All rights reserved.
  * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
@@ -229,6 +230,7 @@ void kgsl_pwrctrl_pwrlevel_change(struct kgsl_device *device,
 	if (pwr->bus_mod < 0 || new_level < old_level) {
 		pwr->bus_mod = 0;
 		pwr->bus_percent_ab = 0;
+		pwr->ddr_stall_percent = 0;
 	}
 	/*
 	 * Update the bus before the GPU clock to prevent underrun during
@@ -404,8 +406,9 @@ static void kgsl_pwrctrl_min_pwrlevel_set(struct kgsl_device *device,
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
 
 	mutex_lock(&device->mutex);
-	if (level >= pwr->num_pwrlevels)
-		level = pwr->num_pwrlevels - 1;
+
+	if (level > pwr->min_render_pwrlevel)
+		level = pwr->min_render_pwrlevel;
 
 	/* You can't set a minimum power level lower than the maximum */
 	if (level < pwr->max_pwrlevel)
@@ -1626,8 +1629,6 @@ void kgsl_pwrctrl_close(struct kgsl_device *device)
 
 	pwr->power_flags = 0;
 
-	kgsl_bus_close(device);
-
 	if (dev_pm_qos_request_active(&pwr->sysfs_thermal_req))
 		dev_pm_qos_remove_request(&pwr->sysfs_thermal_req);
 
@@ -2257,31 +2258,6 @@ int kgsl_pwrctrl_set_default_gpu_pwrlevel(struct kgsl_device *device)
 
 	/* Request adjusted DCVS level */
 	return device->ftbl->gpu_clock_set(device, pwr->active_pwrlevel);
-}
-
-/**
- * kgsl_pwrctrl_update_thermal_pwrlevel() - Update GPU thermal power level
- * @device: Pointer to the kgsl_device struct
- */
-void kgsl_pwrctrl_update_thermal_pwrlevel(struct kgsl_device *device)
-{
-	s32 qos_max_freq = dev_pm_qos_read_value(&device->pdev->dev,
-				DEV_PM_QOS_MAX_FREQUENCY);
-	int level = 0;
-
-	if (qos_max_freq != PM_QOS_MAX_FREQUENCY_DEFAULT_VALUE) {
-		level = _get_nearest_pwrlevel(&device->pwrctrl,
-				qos_max_freq * 1000);
-		if (level < 0)
-			return;
-	}
-
-	if (level != device->pwrctrl.thermal_pwrlevel) {
-		trace_kgsl_thermal_constraint(
-			device->pwrctrl.pwrlevels[level].gpu_freq);
-
-		device->pwrctrl.thermal_pwrlevel = level;
-	}
 }
 
 int kgsl_gpu_num_freqs(void)

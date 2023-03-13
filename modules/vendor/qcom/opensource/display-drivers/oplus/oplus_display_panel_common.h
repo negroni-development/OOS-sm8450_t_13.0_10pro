@@ -23,8 +23,8 @@
 #include "dsi_pwr.h"
 #include "sde_dbg.h"
 
-#define PANEL_REG_MAX_LENS 28
-#define PANEL_TX_MAX_BUF 256
+#define PANEL_REG_MAX_LENS 512
+#define PANEL_TX_MAX_BUF 512
 
 struct panel_id {
 	uint32_t DA;

@@ -126,6 +126,9 @@
 #define SDU_BOOT_STAT_PLL_HS           (0x02)
 
 #define SDU_BOOT_STAT_REG9     (SDU_CTL_BASE + 0x19) // [RO][79:72  ]
+#ifdef SLT_ENABLE
+#define SDU_BOOT_STAT_VERIFY_PASS_SLT  (0x01 << 6)
+#endif
 
 #define SDU_AP_STAT_REGA       (SDU_CTL_BASE + 0x1a) // [RO][87:80  ]
 #define SDU_AP_STAT_REGB       (SDU_CTL_BASE + 0x1b) // [RO][95:88  ]
@@ -191,6 +194,9 @@
 #define BOOT_STEP_OS_DONE       ((0x10 & 0x3F) << 26)
 #define BOOT_STEP_NPU_DONE      ((0x20 & 0x3F) << 26)
 
+#ifdef SLT_ENABLE
+#define BOOT_TRANS_BIT_2ND_PBL (0x01 << (16-1))
+#endif
 
 #define GLB_CPU_RELEASE_RESET		0x4002046C
 #define CPU_RELEASE_RESET	(0x01)
@@ -230,6 +236,9 @@
 #define R_DDR_INIT_TO		1015
 #define R_OS_VER_TO		1016
 #define R_NPU_VER_TO		1017
+#ifdef SLT_ENABLE
+#define R_SLT_VER_TO		1018
+#endif
 #define R_BAD_CMOD		1019
 #define R_REPEATED_BOOT		1020
 #define R_PMIC_OC_FAIL		1021
@@ -310,6 +319,8 @@
 #define FW_NPU_ADDR4		0x205B0000
 #define FW_NPU_ADDR5		0x205C0000
 
+#define SLT_PBL_LOG_ADDR	0x00119C00
+#define SLT_PBL_LOG_LEN		0x14400 /* 12E000 - 119C00 */
 #define NORMAL_PBL_LOG_ADDR	0x00107800
 #define NORMAL_PBL_LOG_LEN	(FW_OS_ADDR - NORMAL_PBL_LOG_ADDR)  //0x800
 
@@ -331,6 +342,9 @@ int explorer_proc_pbl_msg(struct explorer_plat_data *epd, struct hal_comm_data *
 enum wait_stage {
     WAIT_SE_OK = 0,
     WAIT_PBL_OK,
+#ifdef SLT_ENABLE
+    WAIT_2ND_PBL_OK,
+#endif
     WAIT_MIPI_OK,
     WAIT_DDR_OK,
     WAIT_OS_OK,

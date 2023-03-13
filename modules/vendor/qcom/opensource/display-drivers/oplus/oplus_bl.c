@@ -17,24 +17,59 @@ char oplus_global_hbm_flags = 0x0;
 static int enable_hbm_enter_dly_on_flags = 0;
 static int enable_hbm_exit_dly_on_flags = 0;
 
+int oplus_panel_parse_bl_config(struct dsi_panel *panel)
+{
+	int rc = 0;
+	u32 val = 0;
+	struct dsi_parser_utils *utils = &panel->utils;
+
+	rc = utils->read_u32(utils->data, "qcom,mdss-dsi-bl-normal-max-level", &val);
+	if (rc) {
+		DSI_DEBUG("[%s] bl-max-level unspecified, defaulting to max level\n",
+			 panel->name);
+		panel->bl_config.bl_normal_max_level = panel->bl_config.bl_max_level;
+	} else {
+		panel->bl_config.bl_normal_max_level = val;
+	}
+
+	rc = utils->read_u32(utils->data, "qcom,mdss-brightness-normal-max-level",
+		&val);
+	if (rc) {
+		DSI_DEBUG("[%s] brigheness-max-level unspecified, defaulting to 255\n",
+			 panel->name);
+		panel->bl_config.brightness_normal_max_level = panel->bl_config.brightness_max_level;
+	} else {
+		panel->bl_config.brightness_normal_max_level = val;
+	}
+
+	rc = utils->read_u32(utils->data, "qcom,mdss-brightness-default-level", &val);
+	if (rc) {
+		DSI_DEBUG("[%s] brightness-default-level unspecified, defaulting normal max\n",
+			 panel->name);
+		panel->bl_config.brightness_default_level = panel->bl_config.brightness_max_level;
+	} else {
+		panel->bl_config.brightness_default_level = val;
+	}
+
+	rc = utils->read_u32(utils->data, "oplus,dsi-dc-backlight-threshold", &val);
+	if (rc) {
+		DSI_INFO("[%s] oplus,dsi-dc-backlight-threshold undefined, default to 260\n",
+				panel->name);
+		panel->bl_config.dc_backlight_threshold = 260;
+		panel->bl_config.oplus_dc_mode = false;
+	} else {
+		panel->bl_config.dc_backlight_threshold = val;
+		panel->bl_config.oplus_dc_mode = true;
+	}
+	DSI_INFO("[%s] dc_backlight_threshold=%d, oplus_dc_mode=%d\n",
+			panel->name, panel->bl_config.dc_backlight_threshold,
+			panel->bl_config.oplus_dc_mode);
+
+	return 0;
+}
+
 static int oplus_display_panel_dly(struct dsi_panel *panel, char hbm_switch)
 {
-	int count = 0;
-	struct dsi_display_mode *mode;
-
-	mode = panel->cur_mode;
-	count = mode->priv_info->cmd_sets[DSI_CMD_DLY_ON].count;
-	if (!count) {
-		DSI_ERR("This panel does not support samsung panel dly on command\n");
-		return 0;
-	}
-
-	count = mode->priv_info->cmd_sets[DSI_CMD_DLY_OFF].count;
-	if (!count) {
-		DSI_ERR("This panel does not support samsung panel dly off command\n");
-		return 0;
-	}
-
 	if (hbm_switch) {
 		if (enable_hbm_enter_dly_on_flags)
 			enable_hbm_enter_dly_on_flags++;
@@ -76,21 +111,6 @@ static int oplus_display_panel_dly(struct dsi_panel *panel, char hbm_switch)
 int oplus_display_panel_backlight_mapping(struct dsi_panel *panel, u32 *backlight_level)
 {
 	u32 bl_lvl = *backlight_level;
-	int count = 0;
-	struct dsi_display_mode *mode;
-
-	mode = panel->cur_mode;
-	count = mode->priv_info->cmd_sets[DSI_CMD_HBM_ENTER_SWITCH].count;
-	if (!count) {
-		DSI_ERR("This panel does not support samsung panel hbm enter command\n");
-		return 0;
-	}
-
-	count = mode->priv_info->cmd_sets[DSI_CMD_HBM_EXIT_SWITCH].count;
-	if (!count) {
-		DSI_ERR("This panel does not support samsung panel hbm exit command\n");
-		return 0;
-	}
 
 	if (!strcmp(panel->oplus_priv.vendor_name, "S6E3HC3")) {
 		if (bl_lvl <= PANEL_MAX_NOMAL_BRIGHTNESS) {

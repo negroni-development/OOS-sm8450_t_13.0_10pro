@@ -38,6 +38,8 @@ int OIS_READ_HALL_DATA_TO_UMD_129 (struct cam_ois_ctrl_t *o_ctrl,struct i2c_sett
 int StoreOisGyroGian(struct cam_ois_ctrl_t *o_ctrl);
 int WriteOisGyroGianToRam(struct cam_ois_ctrl_t *o_ctrl,DUAL_OIS_CALI_RESULTS* current_gyro_gain);
 int DoDualOisGyroOffset(struct cam_ois_ctrl_t *o_ctrl, uint32_t *gyro_data);
+int DoBU24721GyroOffset(struct cam_ois_ctrl_t *o_ctrl, uint32_t *gyro_data);
+
 int QueryDualOisSmaWireStatus(struct cam_ois_ctrl_t *o_ctrl, uint32_t *sma_wire_broken);
 int GetDualOisGyroGain(struct cam_ois_ctrl_t *o_ctrl,DUAL_OIS_GYROGAIN* initial_gyro_gain);
 int WriteDualOisShiftRegister(struct cam_ois_ctrl_t *o_ctrl, uint32_t distance);
@@ -48,6 +50,35 @@ int32_t oplus_cam_ois_construct_default_power_setting_129(struct cam_sensor_powe
 int cam_ois_download_start(struct cam_ois_ctrl_t *o_ctrl);
 void cam_ois_do_power_down(struct cam_ois_ctrl_t *o_ctrl);
 void cam_set_ois_disable(struct cam_ois_ctrl_t *o_ctrl);
+
+int RohmOisWrite(struct cam_ois_ctrl_t *o_ctrl, uint32_t addr, uint32_t data);
+int RohmOisRead(struct cam_ois_ctrl_t *o_ctrl, uint32_t addr, uint32_t* data);
+int Rohm_ois_fw_download(struct cam_ois_ctrl_t *o_ctrl);
+
+uint8_t I2C_FW_8bit__read(uint32_t addr);
+uint32_t I2C_FM_32bit__read(uint32_t addr);
+
+int I2C_FM_8bit_write( uint32_t addr, uint8_t data);
+int I2C_FM_16bit_write( uint32_t addr, uint16_t data);
+void I2C_FM_block_write(void* register_data,int size);
+
+
+
+uint8_t I2C_OIS_8bit__read(uint32_t addr);
+uint16_t I2C_OIS_16bit__read(uint32_t addr);
+uint32_t I2C_OIS_32bit__read(uint32_t addr);
+
+int I2C_OIS_8bit_write(uint32_t addr, uint8_t data);
+int I2C_OIS_16bit_write(uint32_t addr, uint16_t data);
+void I2C_OIS_block_write(void* register_data,int size);
+
+
+
+
+void Wait(int us);
+
+
+
 
 #endif
 /* _DOWNLOAD_OIS_FW_H_ */

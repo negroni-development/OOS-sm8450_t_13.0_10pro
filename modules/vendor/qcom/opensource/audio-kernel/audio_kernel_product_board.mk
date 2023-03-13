@@ -32,6 +32,5 @@ PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/q6_notifier_dlkm.ko\
 	$(KERNEL_MODULES_OUT)/wcd937x_slave_dlkm.ko \
 	$(KERNEL_MODULES_OUT)/hdmi_dlkm.ko
 
-#ifdef OPLUS_ARCH_EXTENDS
--include $(TOP)/vendor/oplus/kernel/audio/oplus_audio_kernel_product_board.mk
+-include $(TOP)/vendor/qcom/opensource/audio-kernel/oplus/oplus_audio_kernel_product_board.mk
 #endif /* OPLUS_ARCH_EXTENDS */

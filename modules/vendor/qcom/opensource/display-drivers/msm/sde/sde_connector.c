@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -22,13 +23,16 @@
 #ifdef OPLUS_BUG_STABILITY
 #include "../oplus/oplus_display_private_api.h"
 #include "../oplus/oplus_dc_diming.h"
-#include "../oplus/oplus_onscreenfingerprint.h"
 #include <linux/sched.h>
 #endif
 
 #ifdef OPLUS_BUG_STABILITY
 #include "../oplus/oplus_adfr.h"
 #endif
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+#include "../oplus/oplus_onscreenfingerprint.h"
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 #ifdef OPLUS_BUG_STABILITY
 #include "sde_trace.h"
@@ -154,6 +158,8 @@ static void sde_dimming_bl_notify(struct sde_connector *conn, struct dsi_backlig
 	bl_info.bl_scale_sv = config->bl_scale_sv;
 	bl_info.status = config->dimming_status;
 	bl_info.min_bl = config->dimming_min_bl;
+	bl_info.bl_scale_max = MAX_BL_SCALE_LEVEL;
+	bl_info.bl_scale_sv_max = SV_BL_SCALE_CAP;
 	event.type = DRM_EVENT_DIMMING_BL;
 	event.length = sizeof(bl_info);
 	SDE_DEBUG("dimming BL event bl_level %d bl_scale %d, bl_scale_sv = %d "
@@ -1031,7 +1037,8 @@ static int _sde_connector_update_bl_scale(struct sde_connector *c_conn)
 
 	bl_config->bl_scale = c_conn->bl_scale > MAX_BL_SCALE_LEVEL ?
 			MAX_BL_SCALE_LEVEL : c_conn->bl_scale;
-	bl_config->bl_scale_sv = c_conn->bl_scale_sv;
+	bl_config->bl_scale_sv = c_conn->bl_scale_sv > SV_BL_SCALE_CAP ?
+			SV_BL_SCALE_CAP : c_conn->bl_scale_sv;
 
 	SDE_DEBUG("bl_scale = %u, bl_scale_sv = %u, bl_level = %u\n",
 		bl_config->bl_scale, bl_config->bl_scale_sv,
@@ -1230,6 +1237,13 @@ static int _sde_connector_update_dirty_properties(
 		case CONNECTOR_PROP_HDR_METADATA:
 			_sde_connector_update_hdr_metadata(c_conn, c_state);
 			break;
+#ifdef OPLUS_BUG_STABILITY
+		case CONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL:
+			if (c_conn) {
+				c_conn->bl_need_sync = true;
+			}
+			break;
+#endif /* OPLUS_BUG_STABILITY */
 		default:
 			/* nothing to do for most properties */
 			break;
@@ -1299,15 +1313,6 @@ int sde_connector_pre_kickoff(struct drm_connector *connector)
 		display->queue_cmd_waits = true;
 
 	rc = _sde_connector_update_dirty_properties(connector);
-
-#ifdef OPLUS_BUG_STABILITY
-	/* Fix low light because of sync_ panel_brightness flash problem */
-	if (c_conn->connector_type == DRM_MODE_CONNECTOR_DSI) {
-		if (oplus_ofp_is_support())
-			rc = oplus_ofp_update_hbm(connector);
-	}
-#endif /* OPLUS_BUG_STABILITY */
-
 	if (rc) {
 		SDE_EVT32(connector->base.id, SDE_EVTLOG_ERROR);
 		goto end;
@@ -2087,9 +2092,21 @@ static int sde_connector_atomic_set_property(struct drm_connector *connector,
 		break;
 #endif
 
+#ifdef OPLUS_BUG_STABILITY
+	case CONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL:
+		msm_property_set_dirty(&c_conn->property_info, &c_state->property_state, idx);
+		break;
+#endif /* OPLUS_BUG_STABILITY */
+
 	default:
 		break;
 	}
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported()) {
+		oplus_ofp_property_update(c_conn, c_state, idx, val);
+	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 	/* check for custom property handling */
 	if (!rc && c_conn->ops.set_property) {
@@ -2383,7 +2400,8 @@ static int _sde_connector_lm_preference(struct sde_connector *sde_conn,
 		return -EINVAL;
 	}
 
-	sde_hw_mixer_set_preference(sde_kms->catalog, num_lm, disp_type);
+	sde_conn->lm_mask = sde_hw_mixer_set_preference(sde_kms->catalog,
+							num_lm, disp_type);
 
 	return ret;
 }
@@ -3097,7 +3115,7 @@ static void sde_connector_check_status_work(struct work_struct *work)
 	dev = conn->base.dev->dev;
 
 	if (!conn->ops.check_status || dev->power.is_suspended ||
-			(conn->dpms_mode != DRM_MODE_DPMS_ON)) {
+			(conn->lp_mode == SDE_MODE_DPMS_OFF)) {
 		SDE_DEBUG("dpms mode: %d\n", conn->dpms_mode);
 		mutex_unlock(&conn->lock);
 		return;
@@ -3240,7 +3258,7 @@ int sde_connector_set_blob_data(struct drm_connector *conn,
 		return -EINVAL;
 	}
 
-	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	info = vzalloc(sizeof(*info));
 	if (!info)
 		return -ENOMEM;
 
@@ -3298,7 +3316,7 @@ int sde_connector_set_blob_data(struct drm_connector *conn,
 			SDE_KMS_INFO_DATALEN(info),
 			prop_id);
 exit:
-	kfree(info);
+	vfree(info);
 
 	return rc;
 }
@@ -3360,6 +3378,11 @@ static int _sde_connector_install_properties(struct drm_device *dev,
 				dsi_display->panel->dyn_clk_caps.dyn_clk_support)
 			msm_property_install_range(&c_conn->property_info, "dyn_bit_clk",
 					0x0, 0, ~0, 0, CONNECTOR_PROP_DYN_BIT_CLK);
+
+#ifdef OPLUS_BUG_STABILITY
+		msm_property_install_volatile_range(&c_conn->property_info, "sync_backlight_level",
+					   0x0, 0, ~0, 0, CONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL);
+#endif /* OPLUS_BUG_STABILITY */
 
 
 		mutex_lock(&c_conn->base.dev->mode_config.mutex);
@@ -3431,6 +3454,14 @@ static int _sde_connector_install_properties(struct drm_device *dev,
 					0x0, 0, ~0, 0, CONNECTOR_PROP_QSYNC_MIN_FPS);
 		}
 #endif
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+		if (oplus_ofp_is_supported()) {
+			msm_property_install_range(&c_conn->property_info, "hbm_enable",
+					0x0, 0, ~0, 0, CONNECTOR_PROP_HBM_ENABLE);
+		}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
+
 		msm_property_install_enum(&c_conn->property_info, "dsc_mode", 0,
 			0, e_dsc_mode, ARRAY_SIZE(e_dsc_mode), 0, CONNECTOR_PROP_DSC_MODE);
 
@@ -3460,11 +3491,6 @@ static int _sde_connector_install_properties(struct drm_device *dev,
 			      CONNECTOR_PROP_DEMURA_PANEL_ID);
 		}
 	}
-
-#ifdef OPLUS_BUG_STABILITY
-	msm_property_install_range(&c_conn->property_info,"CONNECTOR_CUST",
-		0x0, 0, INT_MAX, 0, CONNECTOR_PROP_CUSTOM);
-#endif
 
 	msm_property_install_range(&c_conn->property_info, "bl_scale",
 		0x0, 0, MAX_BL_SCALE_LEVEL, MAX_BL_SCALE_LEVEL,

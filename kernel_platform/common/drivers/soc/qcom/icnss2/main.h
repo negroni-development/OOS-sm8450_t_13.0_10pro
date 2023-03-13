@@ -25,8 +25,11 @@
 #define ICNSS_SMEM_VALUE_MASK 0xFFFFFFFF
 #define ICNSS_SMEM_SEQ_NO_POS 16
 #define QCA6750_PATH_PREFIX    "qca6750/"
+#define ADRASTEA_PATH_PREFIX   "adrastea/"
 #define ICNSS_MAX_FILE_NAME      35
 #define ICNSS_PCI_EP_WAKE_OFFSET 4
+#define ICNSS_DISABLE_M3_SSR 0
+#define ICNSS_ENABLE_M3_SSR 1
 
 extern uint64_t dynamic_feature_mask;
 
@@ -34,7 +37,6 @@ enum icnss_bdf_type {
 	ICNSS_BDF_BIN,
 	ICNSS_BDF_ELF,
 	ICNSS_BDF_REGDB = 4,
-	ICNSS_BDF_DUMMY = 255,
 };
 
 struct icnss_control_params {
@@ -59,6 +61,7 @@ enum icnss_driver_event_type {
 	ICNSS_DRIVER_EVENT_QDSS_TRACE_FREE,
 	ICNSS_DRIVER_EVENT_M3_DUMP_UPLOAD_REQ,
 	ICNSS_DRIVER_EVENT_QDSS_TRACE_REQ_DATA,
+	ICNSS_DRIVER_EVENT_SUBSYS_RESTART_LEVEL,
 	ICNSS_DRIVER_EVENT_MAX,
 };
 
@@ -175,11 +178,18 @@ struct icnss_fw_mem {
 };
 
 enum icnss_smp2p_msg_id {
-	ICNSS_POWER_SAVE_ENTER = 1,
+	ICNSS_RESET_MSG,
+	ICNSS_POWER_SAVE_ENTER,
 	ICNSS_POWER_SAVE_EXIT,
 	ICNSS_TRIGGER_SSR,
-	ICNSS_PCI_EP_POWER_SAVE_ENTER = 6,
+	ICNSS_SOC_WAKE_REQ,
+	ICNSS_SOC_WAKE_REL,
+	ICNSS_PCI_EP_POWER_SAVE_ENTER,
 	ICNSS_PCI_EP_POWER_SAVE_EXIT,
+};
+
+struct icnss_subsys_restart_level_data {
+	uint8_t restart_level;
 };
 
 struct icnss_stats {
@@ -260,6 +270,9 @@ struct icnss_stats {
 	u32 soc_wake_req;
 	u32 soc_wake_resp;
 	u32 soc_wake_err;
+	u32 restart_level_req;
+	u32 restart_level_resp;
+	u32 restart_level_err;
 };
 
 #define WLFW_MAX_TIMESTAMP_LEN 32
@@ -314,6 +327,19 @@ struct icnss_thermal_cdev {
 	struct thermal_cooling_device *tcdev;
 };
 
+enum smp2p_out_entry {
+	ICNSS_SMP2P_OUT_POWER_SAVE,
+	ICNSS_SMP2P_OUT_SOC_WAKE,
+	ICNSS_SMP2P_OUT_EP_POWER_SAVE,
+	ICNSS_SMP2P_OUT_MAX
+};
+
+static const char * const icnss_smp2p_str[] = {
+	[ICNSS_SMP2P_OUT_POWER_SAVE] = "wlan-smp2p-out",
+	[ICNSS_SMP2P_OUT_SOC_WAKE] = "wlan-soc-wake-smp2p-out",
+	[ICNSS_SMP2P_OUT_EP_POWER_SAVE] = "wlan-ep-powersave-smp2p-out",
+};
+
 struct smp2p_out_info {
 	unsigned short seq;
 	unsigned int smem_bit;
@@ -324,6 +350,20 @@ struct icnss_dms_data {
 	u8 mac_valid;
 	u8 nv_mac_not_prov;
 	u8 mac[QMI_WLFW_MAC_ADDR_SIZE_V01];
+};
+
+struct icnss_ramdump_info {
+	int minor;
+	char name[32];
+	struct device *dev;
+};
+
+struct icnss_pinctrl_info {
+	struct pinctrl *pinctrl;
+	struct pinctrl_state *wlan_pon_en;
+	struct pinctrl_state *wlan_pon_dis;
+	struct pinctrl_state *wlan_poff_en;
+	struct pinctrl_state *wlan_poff_dis;
 };
 
 struct icnss_priv {
@@ -387,19 +427,21 @@ struct icnss_priv {
 	struct icnss_stats stats;
 	void *modem_notify_handler;
 	void *wpss_notify_handler;
+	void *wpss_early_notify_handler;
 	struct notifier_block modem_ssr_nb;
 	struct notifier_block wpss_ssr_nb;
+	struct notifier_block wpss_early_ssr_nb;
 	uint32_t diag_reg_read_addr;
 	uint32_t diag_reg_read_mem_type;
 	uint32_t diag_reg_read_len;
 	uint8_t *diag_reg_read_buf;
 	atomic_t pm_count;
-	struct ramdump_device *msa0_dump_dev;
-	struct ramdump_device *m3_dump_dev_seg1;
-	struct ramdump_device *m3_dump_dev_seg2;
-	struct ramdump_device *m3_dump_dev_seg3;
-	struct ramdump_device *m3_dump_dev_seg4;
-	struct ramdump_device *m3_dump_dev_seg5;
+	struct icnss_ramdump_info *msa0_dump_dev;
+	struct icnss_ramdump_info *m3_dump_phyareg;
+	struct icnss_ramdump_info *m3_dump_phydbg;
+	struct icnss_ramdump_info *m3_dump_wmac0reg;
+	struct icnss_ramdump_info *m3_dump_wcssdbg;
+	struct icnss_ramdump_info *m3_dump_phyapdmem;
 	bool force_err_fatal;
 	bool allow_recursive_recovery;
 	bool early_crash_ind;
@@ -409,7 +451,7 @@ struct icnss_priv {
 	struct mutex dev_lock;
 	uint32_t fw_error_fatal_irq;
 	uint32_t fw_early_crash_irq;
-	struct smp2p_out_info smp2p_info;
+	struct smp2p_out_info smp2p_info[ICNSS_SMP2P_OUT_MAX];
 	struct completion unblock_shutdown;
 	struct adc_tm_param vph_monitor_params;
 	struct adc_tm_chip *adc_tm_dev;
@@ -443,12 +485,29 @@ struct icnss_priv {
 	bool root_pd_shutdown;
 	struct mbox_client mbox_client_data;
 	struct mbox_chan *mbox_chan;
+	u32 wlan_en_delay_ms;
+	struct class *icnss_ramdump_class;
+	dev_t icnss_ramdump_dev;
+	struct completion smp2p_soc_wake_wait;
+	uint32_t fw_soc_wake_ack_irq;
+	char foundry_name;
+	bool bdf_download_support;
+	unsigned long device_config;
+	bool wpss_supported;
+	struct icnss_pinctrl_info pinctrl_info;
+	bool pon_gpio_control;
 };
 
 struct icnss_reg_info {
 	uint32_t mem_type;
 	uint32_t reg_offset;
 	uint32_t data_len;
+};
+
+enum pmic_pwr_seq {
+	PMIC_PWR_OFF,
+	PMIC_PWR_ON,
+	PMIC_PWR_OFF_ON,
 };
 
 void icnss_free_qdss_mem(struct icnss_priv *priv);
@@ -470,5 +529,7 @@ int icnss_update_cpr_info(struct icnss_priv *priv);
 void icnss_add_fw_prefix_name(struct icnss_priv *priv, char *prefix_name,
 			      char *name);
 int icnss_aop_mbox_init(struct icnss_priv *priv);
+int icnss_get_pinctrl(struct icnss_priv *priv);
+int icnss_pmic_gpio_store(struct icnss_priv *priv, uint32_t gpio, bool state);
 #endif
 

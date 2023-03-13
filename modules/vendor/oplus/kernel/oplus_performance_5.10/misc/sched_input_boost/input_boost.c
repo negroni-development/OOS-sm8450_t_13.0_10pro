@@ -46,9 +46,9 @@ void adjust_sched_assist_input_ctrl(void) {
 	}
 }
 
- void sched_assist_adjust_slide_param(unsigned int *maxtime) {
+void sched_assist_adjust_slide_param(unsigned int *maxtime) {
 	 /*give each scene with default boost value*/
-	 if (sysctl_slide_boost_enabled) {
+	if (sysctl_slide_boost_enabled) {
 		 if (sysctl_frame_rate <= 90)
 			 *maxtime = HALF1;
 		 else if (sysctl_frame_rate <= 120)
@@ -63,7 +63,7 @@ void adjust_sched_assist_input_ctrl(void) {
 		 else
 			 *maxtime = 6;
 	 }
- }
+}
 
 u64 calc_ux_load(struct task_struct *p, u64 wallclock)
 {
@@ -216,15 +216,27 @@ void disable_input_boost_timer(void)
 
 enum hrtimer_restart input_boost_timeout(struct hrtimer *timer)
 {
-	ktime_t now,delta;
+	ktime_t now;
 	now = ktime_get();
 
-	delta = ktime_sub(now, ib_last_time);
-	if (ktime_to_ns(delta) > intput_boost_duration) {
-		ib_last_time = now;
+	ib_last_time = now;
+	sysctl_input_boost_enabled = 0;
+	return HRTIMER_NORESTART;
+}
+
+int oplus_slide_boost_ctrl_handler(struct ctl_table * table, int write, void __user * buffer, size_t * lenp, loff_t * ppos)
+{
+	int result;
+
+	result = proc_dointvec(table, write, buffer, lenp, ppos);
+	if (!write)
+		goto out;
+	if (sysctl_input_boost_enabled && sysctl_slide_boost_enabled) {
+		disable_input_boost_timer();
 		sysctl_input_boost_enabled = 0;
 	}
-	return HRTIMER_NORESTART;
+out:
+	return result;
 }
 
 int oplus_input_boost_ctrl_handler(struct ctl_table * table, int write, void __user * buffer, size_t * lenp, loff_t * ppos)
@@ -242,14 +254,14 @@ out:
 
 int oplus_input_boost_init(void)
 {
-       int ret = 0;
+	int ret = 0;
 
-       ib_last_time = ktime_get();
-       intput_boost_duration = INPUT_BOOST_DURATION;
+	ib_last_time = ktime_get();
+	intput_boost_duration = INPUT_BOOST_DURATION;
 
-       hrtimer_init(&ibtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-       ibtimer.function = &input_boost_timeout;
+	hrtimer_init(&ibtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	ibtimer.function = &input_boost_timeout;
 
-       return ret;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(oplus_input_boost_init);

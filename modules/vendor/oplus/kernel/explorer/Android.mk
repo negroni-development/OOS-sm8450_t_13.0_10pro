@@ -1,8 +1,8 @@
-ifneq ($(findstring $(TARGET_BOARD_PLATFORM),taro lahaina),)
+ifneq ($(findstring $(TARGET_BOARD_PLATFORM),taro lahaina kalama),)
 $(warning explorer uses android.mk for QCOM)
-
 ###########################################################
 #For explorer on QCOM platform
+MMRM_BOARDS := taro kalama
 
 LOCAL_PATH:= $(call my-dir)
 
@@ -16,7 +16,7 @@ KBUILD_OPTIONS := EXPLORER_ROOT=$(EXPLORER_BLD_DIR)
 KBUILD_OPTIONS += MODNAME=explorer
 KBUILD_OPTIONS += BOARD_PLATFORM=$(TARGET_BOARD_PLATFORM)
 
-ifeq ($(TARGET_BOARD_PLATFORM), taro)
+ifeq ($(call is-board-platform-in-list, $(MMRM_BOARDS)),true)
 	KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS=$(shell pwd)/$(call intermediates-dir-for,DLKM,camera-module-symvers)/Module.symvers
 endif
 
@@ -41,7 +41,7 @@ LOCAL_MODULE_DEBUG_ENABLE := true
 #LOCAL_MODULE_CLASS := SHARED_LIBRARIES
 LOCAL_MODULE_PATH   := $(KERNEL_MODULES_OUT)
 
-ifeq ($(TARGET_BOARD_PLATFORM), taro)
+ifeq ($(call is-board-platform-in-list, $(MMRM_BOARDS)),true)
 	LOCAL_REQUIRED_MODULES        := camera-module-symvers
 	LOCAL_ADDITIONAL_DEPENDENCIES := $(call intermediates-dir-for,DLKM,camera-module-symvers)/Module.symvers
 endif

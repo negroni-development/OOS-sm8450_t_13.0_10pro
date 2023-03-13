@@ -12,6 +12,7 @@
 #include "frame_boost_group.h"
 #include "frame_boost_binder.h"
 #include "webview_boost.h"
+#include "cluster_boost.h"
 #include "frame_info.h"
 #include "walt.h"
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
@@ -22,7 +23,7 @@ static struct proc_dir_entry *frame_boost_proc = NULL;
 static atomic_t fbg_pid = ATOMIC_INIT(-1);
 static atomic_t fbg_tid = ATOMIC_INIT(-1);
 extern atomic_t start_frame;
-extern int isHighFps;
+extern int ishighfps;
 extern struct frame_boost_group default_frame_boost_group;
 extern int stune_boost;
 extern int oplus_input_boost_init(void);
@@ -41,12 +42,11 @@ void ctrl_set_fbg(int pid, int tid, int hwtid1, int hwtid2)
 		atomic_set(&fbg_tid, tid);
 
 	update_frame_thread(pid, tid);
-	//update_hwui_tasks(hwtid1, hwtid2);
 	set_frame_timestamp(FRAME_END);
 
 	if (DEBUG) {
 		unsigned long irqflag;
-		struct task_struct *p =NULL;
+		struct task_struct *p = NULL;
 		struct walt_task_struct *wts;
 		struct frame_boost_group *grp = &default_frame_boost_group;
 		raw_spin_lock_irqsave(&grp->lock, irqflag);
@@ -106,7 +106,7 @@ void ctrl_frame_obt(int pid)
 	if ((pid != current->pid) || (pid != atomic_read(&fbg_pid)))
 		return;
 
-	if (!isHighFps)
+	if (!ishighfps)
 		return;
 
 	set_frame_min_util(600, true);
@@ -120,7 +120,7 @@ void ctrl_set_render(int pid , int tid)
 	update_frame_thread(pid, tid);
 }
 
-void ctrl_set_hwuitasks(int pid ,int hwtid1, int hwtid2)
+void ctrl_set_hwuitasks(int pid , int hwtid1, int hwtid2)
 {
 	if (pid != atomic_read(&fbg_pid))
 		return;
@@ -139,7 +139,7 @@ void ctrl_set_timeout(int pid)
 	if ((pid != current->pid) || (pid != atomic_read(&fbg_pid)))
 		return;
 
-	if (!isHighFps)
+	if (!ishighfps)
 		return;
 
 	grp = frame_grp();
@@ -177,47 +177,63 @@ static long ofb_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		return -EFAULT;
 
 	switch (cmd) {
-		case CMD_ID_SET_FPS:
-			crtl_update_refresh_rate(data.pid, data.vsyncNs);
-			break;
-		case CMD_ID_BOOST_HIT:
-			if (data.stage == BOOST_FRAME_START) {
-				ctrl_frame_state(data.pid, true);
-			}
-			if (data.stage == BOOST_OBTAIN_VIEW) {
-				ctrl_frame_obt(data.pid);
-			}
-			//if (data.stage == BOOST_SET_HWUITASK) {
-			//	ctrl_set_hwuitasks(data.pid, data.hwtid1, data.hwtid2);
-			//}
-			if (data.stage == BOOST_SET_RENDER_THREAD) {
-				ctrl_set_render(data.pid, data.tid);
-			}
-			if (data.stage == BOOST_FRAME_TIMEOUT) {
-				ctrl_set_timeout(data.pid);
-			}
-			//if (data.stage == FRAME_BOOST_END) {
-			//	ctrl_frame_state(data.pid, false);
-			//}
-			break;
-		case CMD_ID_END_FRAME:
-			//ofb_debug("CMD_ID_END_FRAME pid:%d tid:%d", data.pid, data.tid);
-			break;
-		case CMD_ID_SF_FRAME_MISSED:
-			//ofb_debug("CMD_ID_END_FRAME pid:%d tid:%d", data.pid, data.tid);
-			break;
-		case CMD_ID_SF_COMPOSE_HINT:
-			//ofb_debug("CMD_ID_END_FRAME pid:%d tid:%d", data.pid, data.tid);
-			break;
-		case CMD_ID_IS_HWUI_RT:
-			//ofb_debug("CMD_ID_END_FRAME pid:%d tid:%d", data.pid, data.tid);
-			break;
-		case CMD_ID_SET_TASK_TAGGING:
-			//ofb_debug("CMD_ID_END_FRAME pid:%d tid:%d", data.pid, data.tid);
-			break;
-		default:
-			ret = -ENOTTY;
-			break;
+	case CMD_ID_SET_FPS:
+		crtl_update_refresh_rate(data.pid, data.vsyncNs);
+		break;
+	case CMD_ID_BOOST_HIT:
+		if (data.stage == BOOST_FRAME_START) {
+			ctrl_frame_state(data.pid, true);
+		}
+		if (data.stage == BOOST_OBTAIN_VIEW) {
+			ctrl_frame_obt(data.pid);
+		}
+		if (data.stage == BOOST_SET_RENDER_THREAD) {
+			ctrl_set_render(data.pid, data.tid);
+		}
+		if (data.stage == BOOST_FRAME_TIMEOUT) {
+			ctrl_set_timeout(data.pid);
+		}
+		break;
+	case CMD_ID_END_FRAME:
+		break;
+	case CMD_ID_SF_FRAME_MISSED:
+		break;
+	case CMD_ID_SF_COMPOSE_HINT:
+		break;
+	case CMD_ID_IS_HWUI_RT:
+		break;
+	case CMD_ID_SET_TASK_TAGGING:
+		break;
+	default:
+		ret = -ENOTTY;
+		break;
+	}
+
+	return ret;
+}
+
+static bool is_ofb_extra_cmd(unsigned int cmd)
+{
+	if (cmd == CMD_ID_SET_TASK_PREFERED_CLUSTER) {
+		return true;
+	}
+
+	return false;
+}
+
+static long handle_ofb_extra_cmd(unsigned int cmd, void __user *uarg)
+{
+	long ret = 0;
+
+	if (unlikely(walt_disabled))
+		return -EFAULT;
+
+	switch (cmd) {
+	case CMD_ID_SET_TASK_PREFERED_CLUSTER:
+		return fbg_set_task_preferred_cluster(uarg);
+	default:
+		ret = -ENOTTY;
+		break;
 	}
 
 	return ret;
@@ -232,6 +248,10 @@ static long sys_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	if (_IOC_TYPE(cmd) != OFB_MAGIC)
 		return -ENOTTY;
 
+	if (is_ofb_extra_cmd(cmd)) {
+		return handle_ofb_extra_cmd(cmd, uarg);
+	}
+
 	if (_IOC_NR(cmd) >= CMD_ID_MAX)
 		return -ENOTTY;
 
@@ -244,15 +264,15 @@ static long sys_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		return -EFAULT;
 
 	switch (cmd) {
-		case CMD_ID_BOOST_HIT:
-			if (data.stage == BOOST_MOVE_FG) {
-				ctrl_set_fbg(data.pid, data.tid, data.hwtid1, data.hwtid2);
-			}
+	case CMD_ID_BOOST_HIT:
+		if (data.stage == BOOST_MOVE_FG) {
+			ctrl_set_fbg(data.pid, data.tid, data.hwtid1, data.hwtid2);
+		}
 
-			break;
-		default:
-			ret = -ENOTTY;
-			break;
+		break;
+	default:
+		ret = -ENOTTY;
+		break;
 	}
 
 	return ret;
@@ -272,12 +292,12 @@ static long sys_ctrl_compat_ioctl(struct file *file, unsigned int cmd, unsigned 
 
 static int ofb_ctrl_open(struct inode *inode, struct file *file)
 {
-   return 0;
+	return 0;
 }
 
 static int ofb_ctrl_release(struct inode *inode, struct file *file)
 {
-    return 0;
+	return 0;
 }
 
 static const struct proc_ops ofb_ctrl_fops = {
@@ -327,11 +347,11 @@ int frame_boost_init(void)
 		goto ERROR_INIT_VERSION;
 	}
 
+	fbg_cluster_boost_init(frame_boost_proc);
 	register_fbg_vendor_hooks();
 	ret = oplus_input_boost_init();
 	return ret;
 ERROR_INIT_VERSION:
 	remove_proc_entry(FRAMEBOOST_PROC_NODE, NULL);
 	return -ENOENT;
-
 }

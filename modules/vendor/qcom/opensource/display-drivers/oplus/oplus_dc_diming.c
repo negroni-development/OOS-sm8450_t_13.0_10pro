@@ -13,8 +13,6 @@
 
 #include "oplus_display_private_api.h"
 #include "oplus_dc_diming.h"
-#include "oplus_onscreenfingerprint.h"
-#include "oplus_aod.h"
 #include "dsi_defs.h"
 #include "sde_trace.h"
 #include "oplus_display_panel.h"
@@ -34,7 +32,6 @@ EXPORT_SYMBOL(dc_apollo_enable);
 
 static struct dsi_panel_cmd_set oplus_priv_seed_cmd_set;
 
-extern int oplus_dimlayer_hbm;
 /* DC setting for onscreenfinger */
 extern int oplus_dimlayer_bl_enable;
 extern int oplus_dimlayer_bl_alpha_value;
@@ -214,11 +211,6 @@ int sde_connector_update_backlight(struct drm_connector *connector, bool post)
 		int off_delay = 0, off_delay_after = 0;
 		int delay = 0, delay_after = 0;
 
-		if (sde_crtc_get_fingerprint_mode(crtc->state)) {
-			oplus_dimlayer_bl_enabled = oplus_dimlayer_bl;
-			goto done;
-		}
-
 		if (panel->cur_mode->timing.refresh_rate == 120) {
 			if (bl_lvl < 103) {
 				on_vblank = 0;
@@ -353,8 +345,6 @@ int sde_connector_update_backlight(struct drm_connector *connector, bool post)
 		}
 	}
 
-done:
-
 	if (post) {
 		if (oplus_datadimming_vblank_count > 0) {
 			oplus_datadimming_vblank_count--;
@@ -370,53 +360,6 @@ done:
 	return 0;
 }
 EXPORT_SYMBOL(sde_connector_update_backlight);
-
-int oplus_ofp_hande_display_softiris(void)
-{
-	int dimlayer_bl = 0;
-
-	if (oplus_dimlayer_bl_enable) {
-		int backlight = oplus_get_panel_brightness();
-
-		if (backlight > 1 && backlight < oplus_dimlayer_bl_alpha_value &&
-			oplus_ffl_trigger_finish == true && !oplus_dimlayer_hbm) {
-			ktime_t now = ktime_get();
-			ktime_t delta = ktime_sub(now, oplus_backlight_time);
-
-			if (oplus_backlight_delta > 9) {
-				if (oplus_dimlayer_bl == 0 && ktime_to_ns(delta) > 25000000)
-					oplus_dimlayer_bl = 1;
-			} else {
-				oplus_dimlayer_bl = 1;
-			}
-			if (oplus_dimlayer_bl)
-				dimlayer_bl = 1;
-		} else {
-			oplus_dimlayer_bl = 0;
-		}
-	} else {
-		oplus_dimlayer_bl = 0;
-	}
-
-	return dimlayer_bl;
-}
-
-void oplus_ofp_hande_display_backlight(struct dsi_display *display, int hbm_status)
-{
-	if (!display) {
-		pr_err("failed for: %s %d\n", __func__, __LINE__);
-		return;
-	}
-	switch(hbm_status) {
-	case 0 :
-		if (!strcmp(display->panel->oplus_priv.vendor_name, "S6E3HC3")) {
-			oplus_panel_update_backlight_unlock(display->panel);
-		}
-		break;
-	default:
-		break;
-	}
-}
 
 int oplus_seed_bright_to_alpha(int brightness)
 {
@@ -559,10 +502,8 @@ EXPORT_SYMBOL(oplus_dsi_update_seed_backlight);
 int oplus_display_panel_get_dim_alpha(void *buf)
 {
 	unsigned int *temp_alpha = buf;
-	struct dsi_display *display = get_main_display();
 
-	if (!display->panel->is_hbm_enabled ||
-			(get_oplus_display_power_status() != OPLUS_DISPLAY_POWER_ON)) {
+	if (get_oplus_display_power_status() != OPLUS_DISPLAY_POWER_ON) {
 		(*temp_alpha) = 0;
 		return 0;
 	}
@@ -575,7 +516,7 @@ int oplus_display_panel_set_dim_alpha(void *buf)
 {
 	unsigned int *temp_alpha = buf;
 
-	(*temp_alpha) = oplus_panel_alpha;
+	oplus_panel_alpha = *temp_alpha;
 
 	return 0;
 }
@@ -584,10 +525,8 @@ int oplus_display_panel_get_dim_dc_alpha(void *buf)
 {
 	int ret = 0;
 	unsigned int *temp_dim_alpha = buf;
-	struct dsi_display *display = get_main_display();
 
-	if (display->panel->is_hbm_enabled ||
-			get_oplus_display_power_status() != OPLUS_DISPLAY_POWER_ON) {
+	if (get_oplus_display_power_status() != OPLUS_DISPLAY_POWER_ON) {
 		ret = 0;
 	}
 

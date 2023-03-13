@@ -334,7 +334,6 @@
 	};
 
 	//#ifdef OPLUS_FEATURE_THERMAL_HORAE
-	//wangmignyuan@BSP.Power.Thermal 2021/08/04 add for horae thermal
 	shell_front {
 			compatible = "oplus,shell-temp";
 	};
@@ -350,7 +349,6 @@
 
 };
 &qupv3_se4_i2c {
-//#ifdef OPLUS_FEATURE_TP_BASIC /* minghui.wei@BSP.TP.Basic, 2021/08/24, Add for tp */
 	qcom,i2c-touch-active = "synaptics-s3908";
 
 	focaltech@38 {
@@ -417,8 +415,6 @@
 		touchpanel,smooth-level = <0 1 2 4 7 9>;
 		touchpanel,smooth-level-charging = <0 2 4 7 8 9>;
 		touchpanel,sensitive-level = <0 70 55 40 25 10>;
-		touchpanel,smooth-v2-level = <0 1 2 4 5 7>;
-		touchpanel,sensitive-v2-level = <0 90 70 55 40 25>;
 		touchpanel,single-optimized-time = <8>;
 		touchpanel,high-frame-rate-time = <60>;
 
@@ -434,10 +430,10 @@
 
 		/* SW Support Feature Control */
 		black_gesture_support;
+		sportify_aod_gesture_support;
 		//fw_edge_limit_support;
 		pressure_report_support;
 		charger_pump_support;
-		touch_v2_switch_support;
 		game_switch_support;
 		smart_gesture_support;
 		fw_update_app_support;
@@ -480,7 +476,6 @@
 	};
 //#endif /*OPLUS_FEATURE_TP_BASIC*/
 };
-//#ifdef OPLUS_FEATURE_TP_BASIC /* Ping.Zhang@BSP.TP.Basic, 2020/06/04, Add for tp */
 #include "tp/mtp21631-s3908-firmware.dtsi"
 //#endif /*OPLUS_FEATURE_TP_BASIC*/
 

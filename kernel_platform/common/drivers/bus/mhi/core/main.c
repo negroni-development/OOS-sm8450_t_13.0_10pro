@@ -238,6 +238,11 @@ void *mhi_to_virtual(struct mhi_ring *ring, dma_addr_t addr)
 	return (addr - ring->iommu_base) + ring->base;
 }
 
+dma_addr_t mhi_to_physical(struct mhi_ring *ring, void *addr)
+{
+	return (addr - ring->base) + ring->iommu_base;
+}
+
 static void mhi_add_ring_element(struct mhi_controller *mhi_cntrl,
 				 struct mhi_ring *ring)
 {
@@ -799,6 +804,7 @@ static void mhi_process_cmd_completion(struct mhi_controller *mhi_cntrl,
 	struct mhi_ring *mhi_ring = &cmd_ring->ring;
 	struct mhi_tre *cmd_pkt;
 	struct mhi_chan *mhi_chan;
+	struct mhi_tre *mhi_tre;
 	u32 chan;
 
 	if (!is_valid_ring_ptr(mhi_ring, ptr)) {
@@ -808,9 +814,11 @@ static void mhi_process_cmd_completion(struct mhi_controller *mhi_cntrl,
 
 	cmd_pkt = mhi_to_virtual(mhi_ring, ptr);
 
-	if (cmd_pkt != mhi_ring->rp)
+	if (cmd_pkt != mhi_ring->rp) {
+		mhi_tre = mhi_ring->rp;
 		panic("Out of order cmd completion: 0x%llx. Expected: 0x%llx\n",
-		      cmd_pkt, mhi_ring->rp);
+			ptr, (u64)mhi_to_physical(mhi_ring, mhi_tre));
+	}
 
 	if (MHI_TRE_GET_CMD_TYPE(cmd_pkt) == MHI_CMD_SFR_CFG) {
 		mhi_misc_cmd_completion(mhi_cntrl, MHI_CMD_SFR_CFG,
@@ -1307,8 +1315,10 @@ int mhi_gen_tre(struct mhi_controller *mhi_cntrl, struct mhi_chan *mhi_chan,
 
 	if (!info->pre_mapped) {
 		ret = mhi_cntrl->map_single(mhi_cntrl, buf_info);
-		if (ret)
+		if (ret) {
+			write_unlock_bh(&mhi_chan->lock);
 			return ret;
+		}
 	}
 
 	eob = !!(flags & MHI_EOB);
@@ -1322,7 +1332,8 @@ int mhi_gen_tre(struct mhi_controller *mhi_cntrl, struct mhi_chan *mhi_chan,
 	mhi_tre->dword[1] = MHI_TRE_DATA_DWORD1(bei, eot, eob, chain);
 
 	MHI_VERB("Channel: %d WP: 0x%llx TRE: 0x%llx 0x%08x 0x%08x\n",
-		 mhi_chan->chan, mhi_tre, mhi_tre->ptr, mhi_tre->dword[0],
+		 mhi_chan->chan, (u64)mhi_to_physical(tre_ring, mhi_tre),
+		 mhi_tre->ptr, mhi_tre->dword[0],
 		 mhi_tre->dword[1]);
 
 	/* increment WP */
@@ -1807,9 +1818,7 @@ static int mhi_update_transfer_state(struct mhi_device *mhi_dev,
 				     enum mhi_ch_state_type to_state)
 {
 	struct mhi_controller *mhi_cntrl = mhi_dev->mhi_cntrl;
-	struct device *dev = &mhi_cntrl->mhi_dev->dev;
 	struct mhi_chan *mhi_chan;
-	struct mhi_chan_ctxt *chan_ctxt;
 	int dir, ret;
 
 	for (dir = 0; dir < 2; dir++) {
@@ -1823,13 +1832,6 @@ static int mhi_update_transfer_state(struct mhi_device *mhi_dev,
 		 * both upon failure
 		 */
 		mutex_lock(&mhi_chan->mutex);
-		chan_ctxt = &mhi_cntrl->mhi_ctxt->chan_ctxt[mhi_chan->chan];
-		if (!(chan_ctxt->chcfg & CHAN_CTX_CHSTATE_MASK)) {
-			mutex_unlock(&mhi_chan->mutex);
-			MHI_ERR("Channel %s(%u) context not initialized\n",
-				mhi_chan->name, mhi_chan->chan);
-			return -EINVAL;
-		}
 		ret = mhi_update_channel_state(mhi_cntrl, mhi_chan, to_state);
 		if (ret) {
 			mutex_unlock(&mhi_chan->mutex);

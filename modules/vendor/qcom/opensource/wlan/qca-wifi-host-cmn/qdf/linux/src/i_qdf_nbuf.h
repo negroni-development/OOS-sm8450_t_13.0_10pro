@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -79,6 +80,9 @@ typedef struct sk_buff_head __qdf_nbuf_queue_head_t;
 
 #define IEEE80211_RADIOTAP_HE_MU_OTHER 25
 
+#define IEEE80211_RADIOTAP_EXT1_USIG	1
+#define IEEE80211_RADIOTAP_EXT1_EHT	2
+
 /* mark the first packet after wow wakeup */
 #define QDF_MARK_FIRST_WAKEUP_PACKET   0x80000000
 
@@ -117,6 +121,7 @@ typedef union {
  * @rx.dev.priv_cb_w.ext_cb_ptr: extended cb pointer
  * @rx.dev.priv_cb_w.fctx: ctx to handle special pkts defined by ftype
  * @rx.dev.priv_cb_w.msdu_len: length of RX packet
+ * @rx.dev.priv_cb_w.ipa_smmu_map: do IPA smmu map
  * @rx.dev.priv_cb_w.peer_id: peer_id for RX packet
  * @rx.dev.priv_cb_w.flag_intra_bss: flag to indicate this is intra bss packet
  * @rx.dev.priv_cb_w.protocol_tag: protocol tag set by app for rcvd packet type
@@ -234,7 +239,7 @@ struct qdf_nbuf_cb {
 					void *fctx;
 					uint16_t msdu_len : 14,
 						 flag_intra_bss : 1,
-						 reserved : 1;
+						 ipa_smmu_map : 1;
 					uint16_t peer_id;
 					uint16_t protocol_tag;
 					uint16_t flow_tag;

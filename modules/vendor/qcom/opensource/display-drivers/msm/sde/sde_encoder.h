@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
@@ -57,6 +58,13 @@
 
 /* below this fps limit, timeouts are adjusted based on fps */
 #define DEFAULT_TIMEOUT_FPS_THRESHOLD            24
+
+#define NUM_FSC_FIELDS 3
+#define PLANAR_RGB_PACKING 3
+#define GET_MODE_WIDTH(fsc_mode, mode) \
+	(fsc_mode ? mode->hdisplay / PLANAR_RGB_PACKING : mode->hdisplay)
+#define GET_MODE_HEIGHT(fsc_mode, mode) \
+	(fsc_mode ? mode->vdisplay * NUM_FSC_FIELDS : mode->vdisplay)
 
 /**
  * Encoder functions and data types
@@ -190,6 +198,7 @@ struct sde_encoder_ops {
  * @cur_conn_roi:		current connector roi
  * @prv_conn_roi:		previous connector roi to optimize if unchanged
  * @crtc			pointer to drm_crtc
+ * @fal10_veto_override:	software override for micro idle fal10 veto
  * @recovery_events_enabled:	status of hw recovery feature enable by client
  * @elevated_ahb_vote:		increase AHB bus speed for the first frame
  *				after power collapse
@@ -267,6 +276,7 @@ struct sde_encoder_virt {
 	struct sde_rect prv_conn_roi;
 	struct drm_crtc *crtc;
 
+	bool fal10_veto_override;
 	bool recovery_events_enabled;
 	bool elevated_ahb_vote;
 	struct dev_pm_qos_request pm_qos_cpu_req[NR_CPUS];
@@ -313,6 +323,12 @@ enum oplus_sync_method {
 void sde_encoder_get_hw_resources(struct drm_encoder *encoder,
 		struct sde_encoder_hw_resources *hw_res,
 		struct drm_connector_state *conn_state);
+
+/**
+ * sde_encoder_trigger_rsc_state_change - rsc state change.
+ * @encoder:	encoder pointer
+ */
+void sde_encoder_trigger_rsc_state_change(struct drm_encoder *drm_enc);
 
 /**
  * sde_encoder_early_wakeup - early wake up display

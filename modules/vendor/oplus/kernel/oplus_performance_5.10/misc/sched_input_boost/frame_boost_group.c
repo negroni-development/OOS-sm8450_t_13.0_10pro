@@ -4,6 +4,7 @@
 #include <linux/sched/cpufreq.h>
 #include <trace/events/sched.h>
 #include <linux/reciprocal_div.h>
+#include <trace/hooks/cgroup.h>
 #include <../../../drivers/android/binder_internal.h>
 #include "walt.h"
 #include "frame_boost_group.h"
@@ -22,10 +23,15 @@ struct task_struct *hwtask2 = NULL;
 struct frame_boost_group default_frame_boost_group;
 atomic_t start_frame = ATOMIC_INIT(1);
 int stune_boost = 20;
+int need_spb = 0;
 DEFINE_RAW_SPINLOCK(fbg_lock);
 int min_clusters = 2;
 char lc[] = "ndroid.launcher";
-extern bool isHighFps;
+char dy[] = "droid.ugc.aweme";
+char ks[] = ".smile.gifmaker";
+char douyu[] = "v.douyu.android";
+
+extern bool ishighfps;
 extern bool use_vload;
 extern unsigned long cpu_util_without(int cpu, struct task_struct *p);
 extern int sysctl_slide_boost_enabled;
@@ -46,9 +52,9 @@ extern u64 last_migrate_time;
 
 bool isUi(struct task_struct *p)
 {
-       if (ui == NULL)
-               return false;
-       return p == ui;
+	if (ui == NULL)
+		return false;
+	return p == ui;
 }
 
 struct frame_boost_group * frame_grp(void)
@@ -292,55 +298,55 @@ int sched_set_group_window_rollover(void)
 
 static unsigned long capacity_spare_without(int cpu, struct task_struct *p)
 {
-    return max_t(long, capacity_of(cpu) - cpu_util_without(cpu, p), 0);
+	return max_t(long, capacity_of(cpu) - cpu_util_without(cpu, p), 0);
 }
 
 static inline unsigned long boosted_task_util(struct task_struct *task)
 {
-       unsigned long util = task_util_est(task);
-       long margin = schedtune_grp_margin(util);
+	unsigned long util = task_util_est(task);
+	long margin = schedtune_grp_margin(util);
 
 	trace_sched_boost_task(task, util, margin);
-       return util + margin;
+	return util + margin;
 }
 
 static inline bool task_demand_fits(struct task_struct *p, int cpu)
 {
-       unsigned long capacity = capacity_orig_of(cpu);
-       unsigned long boosted_util = boosted_task_util(p);
-       unsigned int margin = 1024;
+	unsigned long capacity = capacity_orig_of(cpu);
+	unsigned long boosted_util = boosted_task_util(p);
+	unsigned int margin = 1024;
 
-       return (capacity << SCHED_CAPACITY_SHIFT) >=
-                       (boosted_util * margin);
+	return (capacity << SCHED_CAPACITY_SHIFT) >=
+				(boosted_util * margin);
 }
 
 static inline bool frame_task_fits_max(struct task_struct *p, int cpu)
 {
-       unsigned long capacity = capacity_orig_of(cpu);
-       unsigned long max_capacity = cpu_rq(cpu)->rd->max_cpu_capacity;
-       unsigned long task_boost = per_task_boost(p);
-       cpumask_t allowed_cpus;
-       int allowed_cpu;
+	unsigned long capacity = capacity_orig_of(cpu);
+	unsigned long max_capacity = cpu_rq(cpu)->rd->max_cpu_capacity;
+	unsigned long task_boost = per_task_boost(p);
+	cpumask_t allowed_cpus;
+	int allowed_cpu;
 
-       if (capacity == max_capacity)
-               return true;
+	if (capacity == max_capacity)
+		return true;
 
-       if (task_boost > TASK_BOOST_ON_MID)
-               return false;
+	if (task_boost > TASK_BOOST_ON_MID)
+		return false;
 
-       if (task_demand_fits(p, cpu)) {
-               return true;
-       }
+	if (task_demand_fits(p, cpu)) {
+		return true;
+	}
 
-       /* Now task does not fit. Check if there's a better one. */
-       cpumask_and(&allowed_cpus, &p->cpus_mask, cpu_online_mask);
-       for_each_cpu(allowed_cpu, &allowed_cpus) {
-               if (capacity_orig_of(allowed_cpu) > capacity)
-                       return false; /* Misfit */
-       }
+	/* Now task does not fit. Check if there's a better one. */
+	cpumask_and(&allowed_cpus, &p->cpus_mask, cpu_online_mask);
+	for_each_cpu(allowed_cpu, &allowed_cpus) {
+		if (capacity_orig_of(allowed_cpu) > capacity)
+			return false; /* Misfit */
+	}
 
-       /* Already largest capacity in allowed cpus. */
-       return true;
+	/* Already largest capacity in allowed cpus. */
+	return true;
 }
 
 struct cpumask *find_rtg_target(struct task_struct *p)
@@ -387,7 +393,7 @@ struct cpumask *find_rtg_target(struct task_struct *p)
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
 /* optimize fingerprint scenario */
-static bool skip_finger_cpu(struct rq* rq)
+static bool skip_finger_cpu(struct rq *rq)
 {
 	struct oplus_rq *orq = NULL;
 	struct oplus_task_struct *ots = NULL;
@@ -401,7 +407,7 @@ static bool skip_finger_cpu(struct rq* rq)
 		list_for_each(pos, &orq->ux_list) {
 			ots = container_of(pos, struct oplus_task_struct, ux_entry);
 			if (ots->ux_state == SA_TYPE_LISTPICK) {
-				need_skip =true;
+				need_skip = true;
 				break;
 			}
 		}
@@ -414,9 +420,9 @@ static bool skip_finger_cpu(struct rq* rq)
 
 bool is_prime_fits(int cpu)
 {
-	struct task_struct *curr= NULL;
+	struct task_struct *curr = NULL;
 	struct walt_task_struct *wts = NULL;
-	struct rq *rq= NULL;
+	struct rq *rq = NULL;
 	bool need_skip = false;
 
 	if (cpu < 0 || !cpu_active(cpu))
@@ -462,9 +468,10 @@ int find_fbg_cpu(struct task_struct *p)
 	int active_cpu = -1;
 	struct frame_boost_group *grp = NULL;
 	struct walt_sched_cluster *preferred_cluster = NULL;
-	struct task_struct *curr= NULL;
+	struct task_struct *curr = NULL;
 	struct walt_task_struct *wts = NULL;
-	struct rq *rq= NULL;
+	struct rq *rq = NULL;
+	int loop = 0;
 
 	rcu_read_lock();
 
@@ -481,52 +488,67 @@ int find_fbg_cpu(struct task_struct *p)
 		if (is_full_throttle_boost() && num_sched_clusters >= min_clusters)
 			preferred_cluster = sched_cluster[num_sched_clusters -2];
 
-		if (!preferred_cluster) {
-			rcu_read_unlock();
-			return -1;
-		}
-		preferred_cpus = &preferred_cluster->cpus;
-
-		cpumask_and(&search_cpus, &p->cpus_mask, cpu_active_mask);
-
-		for_each_cpu_and(i, &search_cpus, preferred_cpus) {
-			rq = cpu_rq(i);
-			curr = rq->curr;
-			if (curr) {
-				wts = (struct walt_task_struct *) curr->android_vendor_data1;
-				if (wts->fbg_depth != 0)
-					continue;
-
-				/* skip this cpu to improve scheduler lantency*/
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
-				if (oplus_get_im_flag(curr) == IM_FLAG_SURFACEFLINGER ||
-					oplus_get_im_flag(curr) == IM_FLAG_RENDERENGINE)
-					continue;
-#endif
-			}
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
-			/* optimize fingerprint scenario */
-			if (skip_finger_cpu(rq))
-				continue;
-#endif
-
-			if (active_cpu == -1)
-				active_cpu = i;
-
-			if (is_reserved(i))
-				continue;
-
-			if (available_idle_cpu(i) || (i == task_cpu(p) && p->state == TASK_RUNNING)) {
+		do {
+			if (!preferred_cluster) {
 				rcu_read_unlock();
-				return i;
+				return -1;
+			}
+			preferred_cpus = &preferred_cluster->cpus;
+
+			cpumask_and(&search_cpus, &p->cpus_mask, cpu_active_mask);
+
+			for_each_cpu_and(i, &search_cpus, preferred_cpus) {
+				rq = cpu_rq(i);
+				curr = rq->curr;
+				if (curr) {
+					wts = (struct walt_task_struct *) curr->android_vendor_data1;
+					if (wts->fbg_depth != 0)
+						continue;
+
+					/* skip this cpu to improve scheduler lantency*/
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
+					if (oplus_get_im_flag(curr) == IM_FLAG_SURFACEFLINGER ||
+						oplus_get_im_flag(curr) == IM_FLAG_RENDERENGINE)
+						continue;
+					if (oplus_get_im_flag(curr) == IM_FLAG_CAMERA_HAL)
+						continue;
+					if (test_task_is_rt(curr) &&
+						oplus_get_im_flag(curr) == IM_FLAG_HWBINDER)
+						continue;
+#endif
+				}
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
+				/* optimize fingerprint scenario */
+				if (skip_finger_cpu(rq))
+					continue;
+#endif
+
+				if (active_cpu == -1)
+					active_cpu = i;
+
+				if (is_reserved(i))
+					continue;
+
+				if (available_idle_cpu(i) || (i == task_cpu(p) && p->state == TASK_RUNNING)) {
+					rcu_read_unlock();
+					return i;
+				}
+
+				spare_cap = capacity_spare_without(i, p);
+				if (spare_cap > max_spare_cap) {
+					max_spare_cap = spare_cap;
+					max_spare_cap_cpu = i;
+				}
 			}
 
-			spare_cap = capacity_spare_without(i, p);
-			if (spare_cap > max_spare_cap) {
-				max_spare_cap = spare_cap;
-				max_spare_cap_cpu = i;
+			if (num_sched_clusters >= 3 &&
+				preferred_cluster->id == num_sched_clusters - 1) {
+				loop = 1;
+				preferred_cluster = sched_cluster[num_sched_clusters - 2];
+			} else {
+				loop = 0;
 			}
-		}
+		} while (loop);
 	}
 	rcu_read_unlock();
 
@@ -565,12 +587,16 @@ static long schedtune_margin(unsigned long signal, long boost)
 
 int schedtune_grp_margin(unsigned long util)
 {
+	if (need_spb)
+		goto done;
+
 	if (stune_boost == 0)
 		return 0;
 
-	if ((!isHighFps) && !(sysctl_slide_boost_enabled || sysctl_input_boost_enabled))
+	if ((!ishighfps) && !(sysctl_slide_boost_enabled || sysctl_input_boost_enabled))
 		return 0;
 
+done:
 	return schedtune_margin(util, stune_boost);
 }
 
@@ -731,7 +757,7 @@ void sched_set_group_normalized_util(unsigned long util, unsigned int flag)
 
 static void remove_from_frame_boost_group(struct task_struct *p)
 {
-    struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
+	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
 	struct frame_boost_group *grp = wts->fbg;
 	struct rq* rq;
 	struct rq_flags flag;
@@ -817,12 +843,6 @@ int set_fbg_sched(struct task_struct *task, bool is_add)
 	if (!task)
 		return err;
 
-	//if (is_add && task->sched_class != &fair_sched_class)
-	//	return err;
-	//if (is_add && (task->sched_class != &fair_sched_class &&
-	//		task->sched_class != &rt_sched_class))
-	//	return err;
-
 	if (in_interrupt()) {
 		pr_err("[FRAME_BOOST]: %s is in interrupt\n", __func__);
 		return err;
@@ -897,10 +917,15 @@ void update_frame_thread(int pid, int tid)
 	ui = do_update_thread(pid, ui);
 	render = do_update_thread(tid, render);
 	if (ui) {
-		if (strstr(ui->comm, lc)) {
+		if (strstr(ui->comm, lc)
+			|| strstr(ui->comm, dy)
+			|| strstr(ui->comm, ks)
+			|| strstr(ui->comm, douyu)) {
 			stune_boost = 30;
+			need_spb = 1;
 		} else {
 			stune_boost = 20;
+			need_spb = 0;
 		}
 	}
 
@@ -1017,40 +1042,72 @@ void binder_thread_remove_fbg(struct task_struct *thread, bool oneway)
 /* implement vender hook in driver/android/binder.c */
 void fbg_binder_wakeup_hook(void *unused, struct task_struct *task, bool sync, struct binder_proc *proc)
 {
-       if (unlikely(walt_disabled))
-               return;
+	if (unlikely(walt_disabled))
+		return;
 
-       binder_thread_set_fbg(task, current, !sync);
+	binder_thread_set_fbg(task, current, !sync);
 }
 
 void fbg_binder_restore_priority_hook(void *unused, struct binder_transaction *t, struct task_struct *task)
 {
-       if (unlikely(walt_disabled))
-               return;
+	if (unlikely(walt_disabled))
+		return;
 
-       if (t != NULL) {
-               binder_thread_remove_fbg(task, false);
-       }
+	if (t != NULL) {
+		binder_thread_remove_fbg(task, false);
+	}
 }
 
 void fbg_binder_wait_for_work_hook(void *unused,
                        bool do_proc_work, struct binder_thread *tsk, struct binder_proc *proc)
 {
-       if (unlikely(walt_disabled))
-               return;
+	if (unlikely(walt_disabled))
+		return;
 
-       if (do_proc_work) {
-               binder_thread_remove_fbg(tsk->task, false);
-       }
+	if (do_proc_work) {
+		binder_thread_remove_fbg(tsk->task, false);
+	}
 }
 
 void fbg_sync_txn_recvd_hook(void *unused, struct task_struct *tsk, struct task_struct *from)
 {
-       if (unlikely(walt_disabled))
-               return;
-       binder_thread_set_fbg(tsk, from, false);
+	if (unlikely(walt_disabled))
+		return;
+	binder_thread_set_fbg(tsk, from, false);
 }
 
+#define TOPAPP 4
+#define VIPAPP 8
+static bool get_grp(struct task_struct *p)
+{
+        struct cgroup_subsys_state *css;
+        if (p == NULL)
+                return false;
+
+        rcu_read_lock();
+        css = task_css(p, cpu_cgrp_id);
+        if (!css) {
+                rcu_read_unlock();
+                return false;
+        }
+        rcu_read_unlock();
+
+        return ((css->id == VIPAPP) || (css->id == TOPAPP));
+}
+
+static void fbg_cgroup_set_task_hook(void *unused, int ret, struct task_struct *p)
+{
+        bool is_top = false;
+        bool is_webview = (oplus_get_im_flag(p) == IM_FLAG_WEBVIEW);
+
+        if (ret || !is_webview)
+                return;
+
+        is_top = get_grp(p);
+
+        /* Clear all frame tasks if the group ui thread move to un-top-app cgroup */
+        set_fbg_thread(p, is_top);
+}
 
 int frame_boost_group_init(void)
 {
@@ -1065,6 +1122,7 @@ int frame_boost_group_init(void)
 	INIT_LIST_HEAD(&grp->tasks);
 	raw_spin_lock_init(&grp->lock);
 	schedtune_spc_rdiv = reciprocal_value(100);
-
+	/* Register vender hook in kernel/cgroup/cgroup-v1.c */
+        register_trace_android_vh_cgroup_set_task(fbg_cgroup_set_task_hook, NULL);
 	return 0;
 }

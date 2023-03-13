@@ -33,6 +33,10 @@ LOCAL_MODULE_KBUILD_NAME    := Module.symvers
 LOCAL_MODULE_PATH           := $(KERNEL_MODULES_OUT)
 include $(DLKM_DIR)/Build_external_kernelmodule.mk
 
+ifeq ($(TARGET_BOARD_PLATFORM), parrot)
+	KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS=$(shell pwd)/$(call intermediates-dir-for,DLKM,mmrm-module-symvers)/Module.symvers
+endif
+
 # Clear shell environment variables from previous android module during build
 include $(CLEAR_VARS)
 # For incremental compilation support.
@@ -52,6 +56,11 @@ LOCAL_MODULE_TAGS           := optional
 #LOCAL_MODULE_DEBUG_ENABLE  := true
 
 ifeq ($(TARGET_BOARD_PLATFORM), taro)
+	LOCAL_REQUIRED_MODULES        := mmrm-module-symvers
+	LOCAL_ADDITIONAL_DEPENDENCIES := $(call intermediates-dir-for,DLKM,mmrm-module-symvers)/Module.symvers
+endif
+
+ifeq ($(TARGET_BOARD_PLATFORM), parrot)
 	LOCAL_REQUIRED_MODULES        := mmrm-module-symvers
 	LOCAL_ADDITIONAL_DEPENDENCIES := $(call intermediates-dir-for,DLKM,mmrm-module-symvers)/Module.symvers
 endif

@@ -15,6 +15,10 @@ ifeq ($(CONFIG_BOARD),RASPBERRYPI)
     ccflags-y += -DZEKU_EXPLORER_PLATFORM_RPI
 endif
 
+ifeq ($(CONFIG_ARCH_KALAMA), y)
+    ccflags-y += -DOPLUS_EXPLORER_NO_PROJECT
+endif
+
 obj-m += explorer.o
 explorer-y := explorer/main.o \
     explorer/spi.o \
@@ -25,12 +29,16 @@ explorer-y := explorer/main.o \
     explorer/power.o \
     explorer/ap_boot.o \
     explorer/exception.o \
-    explorer/rtt_debug.o
+    explorer/rtt_debug.o \
+    slt/slt.o \
+    slt/case/sdio_test_case.o \
+    slt/slt_loader.o
 
 ifneq ($(CONFIG_BOARD),RASPBERRYPI)
-     explorer-y += aon/aon_sensor_core.o
-     explorer-y += aon/aon_sensor_io.o
-     explorer-y += aon/aon_soc_util.o
+     explorer-y += aon/aon_sensor_common.o
+     explorer-y += aon/qcom/qcom_aon_sensor_dev.o
+     explorer-y += aon/qcom/qcom_aon_sensor_io.o
+     explorer-y += aon/qcom/qcom_aon_soc_util.o
 endif
 
 BOARD_VENDOR_KERNEL_MODULES += $(KERNEL_MODULES_OUT)/explorer.ko
@@ -57,6 +65,10 @@ ccflags-y += -DSLT_ENABLE
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/clkbuf/v1/inc \
              -I$(srctree)/drivers/misc/mediatek/clkbuf/v1/src
 
+ifneq ($(CONFIG_BOARD),RASPBERRYPI)
+    ccflags-y += -DMTK_AON
+endif
+
 MODULE_NAME := explorer
 obj-m += $(MODULE_NAME).o
 $(warning $(MODULE_NAME) is kernel module)
@@ -74,6 +86,13 @@ explorer-y := explorer/main.o \
     slt/slt.o \
     slt/case/sdio_test_case.o \
     slt/slt_loader.o
+
+ifneq ($(CONFIG_BOARD),RASPBERRYPI)
+     explorer-y += aon/aon_sensor_common.o
+     explorer-y += aon/mtk/mtk_aon_sensor_dev.o
+     explorer-y += aon/mtk/mtk_aon_sensor_io.o
+     explorer-y += aon/mtk/mtk_aon_soc_util.o
+endif
 
 #End for MTK
 ##########################################################################

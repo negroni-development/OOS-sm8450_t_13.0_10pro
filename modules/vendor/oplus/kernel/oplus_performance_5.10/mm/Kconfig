@@ -52,4 +52,13 @@ config DYNAMIC_TUNING_SWAPPINESS
 	  and support two levels.
 	  Say N if you not sure.
 
+config OPLUS_BALANCE_ANON_FILE_RECLAIM
+	bool "During reclaim treat anon and file backed pages equally"
+	depends on SWAP
+	help
+	  When performing memory reclaim treat anonymous and file backed pages
+	  equally.
+	  Swapping anonymous pages out to memory can be efficient enough to justify
+	  treating anonymous and file backed pages equally.
+
 source "mm/oplus_perf_mm/hybridswap_zram/Kconfig"

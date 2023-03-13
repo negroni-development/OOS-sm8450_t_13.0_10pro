@@ -279,6 +279,10 @@ static int gh_rm_vm_lookup_name_uri(gh_rm_msgid_t msg_id, const char *data,
 
 	req_payload_size = sizeof(*req_payload) + round_up(size, 4);
 	req_payload = kzalloc(req_payload_size, GFP_KERNEL);
+
+	if (!req_payload)
+		return -ENOMEM;
+
 	req_payload->size = size;
 	memcpy(req_payload->data, data, size);
 
@@ -594,6 +598,8 @@ gh_rm_vm_get_hyp_res(gh_vmid_t vmid, u32 *n_entries)
 
 	/* The response payload should contain all the resource entries */
 	if (resp_payload_size < sizeof(*n_entries) ||
+		(sizeof(*resp_entries) &&
+		(resp_payload->n_resource_entries > U32_MAX / sizeof(*resp_entries))) ||
 		(sizeof(*n_entries) > (U32_MAX -
 		(resp_payload->n_resource_entries * sizeof(*resp_entries)))) ||
 		resp_payload_size != sizeof(*n_entries) +

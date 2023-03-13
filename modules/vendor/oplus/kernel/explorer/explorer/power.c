@@ -588,6 +588,10 @@ static int power_control_explorer_internal(struct explorer_plat_data *epd, bool 
 		}
 		usleep_range(35000, 35000);
 		epd->completed_power_state = POWER_IOC_STATE_FIRST;
+#ifdef SLT_ENABLE
+		//Clean slt has booted flag if power off;
+		epd->ebs.slt_has_booted = false;
+#endif
 		if (epd->sdio_data) {
 			reinit_completion(&epd->sdio_remove_completion);
 			timeout = wait_for_completion_interruptible_timeout(&epd->sdio_remove_completion, timeout);
@@ -606,6 +610,33 @@ int power_control_explorer(struct explorer_plat_data *epd, bool is_on) {
 	mutex_lock(&epd->power_sync_lock);
 	err = power_control_explorer_internal(epd, is_on);
 	mutex_unlock(&epd->power_sync_lock);
+	return err;
+}
+
+int power_reload_pmic_otp(struct explorer_plat_data *epd) {
+	int err = 0;
+
+	PM_LOG_I("do PMIC OTP reload\n");
+	PM_LOG_D("time mark start");
+	err = gpio_direction_output(epd->pmic_pon_gpio, 0);
+	if (err) {
+		PM_LOG_E("operate pmic_pon_gpio to 0 fail\n");
+		goto out;
+	}
+	err = gpio_direction_output(epd->pmic_reset_gpio, 1);
+	if (err) {
+		PM_LOG_E("operate pmic_reset_gpio to 1 fail\n");
+		goto out;
+	}
+	usleep_range(4000, 4000);
+	err = gpio_direction_output(epd->pmic_reset_gpio, 0);
+	if (err) {
+		PM_LOG_E("operate pmic_reset_gpio to 0 fail\n");
+		goto out;
+	}
+	usleep_range(22000, 22000);
+out:
+	PM_LOG_D("time mark end");
 	return err;
 }
 
@@ -786,6 +817,38 @@ bool get_explorer_on_status(struct explorer_plat_data *epd) {
 	return is_on;
 }
 
+#ifdef SLT_ENABLE
+int regulator_control_explorer(struct explorer_plat_data *epd, bool is_on) {
+	int err = 0;
+	mutex_lock(&epd->power_sync_lock);
+	PM_LOG_I("is_on: %d\n", is_on);
+	if (epd->is_vcc_sdio_on == is_on) {
+		PM_LOG_I("skip regulator control due to the same state");
+		goto out;
+	}
+
+	if (is_on) {
+		PM_LOG_I("do REGULATOR ON\n");
+		err = regulator_enable(epd->vcc_sdio);
+		if (err) {
+			PM_LOG_E("operate vcc_sdio on fail\n");
+			goto out;
+		}
+	} else {
+		PM_LOG_I("do REGULATOR OFF\n");
+		err = regulator_disable(epd->vcc_sdio);
+		if (err) {
+			PM_LOG_E("operate vcc_sdio off fail\n");
+			goto out;
+		}
+	}
+
+	epd->is_vcc_sdio_on = is_on;
+out:
+	mutex_unlock(&epd->power_sync_lock);
+	return err;
+}
+#endif
 int explorer_process_power_interrupts(struct explorer_plat_data *epd) {
 	int err = 0;
 	int status = 0;

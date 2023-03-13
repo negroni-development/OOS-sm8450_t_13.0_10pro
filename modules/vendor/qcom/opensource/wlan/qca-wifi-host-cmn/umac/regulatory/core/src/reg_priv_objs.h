@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- *
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -29,6 +29,7 @@
 #ifdef CONFIG_AFC_SUPPORT
 #include "reg_services_common.h"
 #endif
+#include <wlan_objmgr_psoc_obj.h>
 
 #define reg_alert(params...) \
 	QDF_TRACE_FATAL(QDF_MODULE_ID_REGULATORY, params)
@@ -114,6 +115,11 @@ struct chan_change_cbk_entry {
  * disabled
  * @ch_avoid_ext_ind: whether need to update extended channel frequency list
  * @avoid_freq_ext_list: the extended avoid channel frequency list
+ * @coex_unsafe_chan_nb_user_prefer: Honor coex unsafe chan cmd from firmware or
+ * userspace
+ * @coex_unsafe_chan_reg_disable: To disable reg channels for received coex
+ * unsafe channels list
+ * @sta_sap_scc_on_indoor_channel: Value of sap+sta scc on indoor support
  */
 struct wlan_regulatory_psoc_priv_obj {
 	struct mas_chan_params mas_chan_params[PSOC_MAX_PHY_REG_CAP];
@@ -178,7 +184,10 @@ struct wlan_regulatory_psoc_priv_obj {
 #ifdef FEATURE_WLAN_CH_AVOID_EXT
 	bool ch_avoid_ext_ind;
 	struct ch_avoid_ind_type avoid_freq_ext_list;
+	bool coex_unsafe_chan_nb_user_prefer;
+	bool coex_unsafe_chan_reg_disable;
 #endif
+	bool sta_sap_scc_on_indoor_channel;
 };
 
 /**
@@ -219,6 +228,7 @@ struct wlan_regulatory_psoc_priv_obj {
  * sent by the target
  * @is_reg_noaction_on_afc_pwr_evt: indicates whether regulatory needs to
  * take action when AFC Power event is received
+ * @sta_sap_scc_on_indoor_channel: Value of sap+sta scc on indoor support
  */
 struct wlan_regulatory_pdev_priv_obj {
 	struct regulatory_channel cur_chan_list[NUM_CHANNELS];
@@ -290,6 +300,7 @@ struct wlan_regulatory_pdev_priv_obj {
 	struct reg_fw_afc_power_event *power_info;
 	bool is_reg_noaction_on_afc_pwr_evt;
 #endif
+	bool sta_sap_scc_on_indoor_channel;
 };
 
 /**

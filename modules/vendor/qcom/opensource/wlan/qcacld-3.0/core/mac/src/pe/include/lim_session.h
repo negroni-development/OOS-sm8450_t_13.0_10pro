@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -179,14 +179,12 @@ struct mlo_link_ie {
 /**
  * struct mlo_link_ie_info - information per link to populate mlo ie
  * @upt_bcn_mlo_ie: notify partner links to update their mlo ie of bcn temp
- * @mlo_rnr_updated: link already notified partner link to update rnr
  * @bss_param_change: bss param changed
  * @bcn_tmpl_exist: bcn template is generated or not
  * @link_ie: IEs which will be used for generating partner mlo IE
  */
 struct mlo_link_ie_info {
 	bool upt_bcn_mlo_ie;
-	bool mlo_rnr_updated;
 	bool bss_param_change;
 	bool bcn_tmpl_exist;
 	struct mlo_link_ie link_ie;
@@ -440,6 +438,8 @@ struct pe_session {
 
 	/*Flag to Track Status/Indicate HBFailure on this session */
 	bool LimHBFailureStatus;
+	int32_t hb_failure_ap_rssi;
+
 	uint32_t gLimPhyMode;
 	uint8_t txLdpcIniFeatureEnabled;
 	/**
@@ -627,7 +627,7 @@ struct pe_session {
 	bool sae_pmk_cached;
 	bool recvd_deauth_while_roaming;
 	bool recvd_disassoc_while_roaming;
-	bool deauth_disassoc_rc;
+	uint16_t deauth_disassoc_rc;
 	enum wmi_obss_color_collision_evt_type obss_color_collision_dec_evt;
 	bool is_session_obss_color_collision_det_enabled;
 	tSirMacEdcaParamRecord ap_mu_edca_params[QCA_WLAN_AC_ALL];
@@ -659,6 +659,7 @@ struct pe_session {
 	struct mlo_partner_info ml_partner_info;
 #endif
 #endif /* WLAN_FEATURE_11BE */
+	uint8_t user_edca_set;
 };
 
 /*-------------------------------------------------------------------------

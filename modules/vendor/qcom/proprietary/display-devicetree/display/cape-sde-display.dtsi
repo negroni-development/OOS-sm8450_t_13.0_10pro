@@ -8,19 +8,31 @@
 		regulator-min-microvolt = <5500000>;
 		regulator-max-microvolt = <5500000>;
 		regulator-enable-ramp-delay = <233>;
-		gpio = <&tlmm 186 0>;
+		//gpio = <&tlmm 186 0>;
 		enable-active-high;
 		regulator-boot-on;
 		proxy-supply = <&display_panel_avdd>;
 		qcom,proxy-consumer-enable;
 		pinctrl-names = "default";
-		pinctrl-0 = <&display_panel_avdd_default>;
+		//pinctrl-0 = <&display_panel_avdd_default>;
 	};
 
 	sde_wb: qcom,wb-display@0 {
 		compatible = "qcom,wb-display";
 		cell-index = <0>;
 		label = "wb_display";
+	};
+
+	disp_rdump_memory: disp_rdump_region@e1000000 {
+		reg = <0xb8000000 0x00800000>;
+		label = "disp_rdump_region";
+	};
+};
+
+&reserved_memory {
+	splash_memory: splash_region {
+		reg = <0x0 0xb8000000 0x0 0x02b00000>;
+		label = "cont_splash_region";
 	};
 };
 
@@ -47,9 +59,13 @@
 	clock-names = "pll_byte_clk0", "pll_dsi_clk0",
 			"pll_byte_clk1", "pll_dsi_clk1",
 			"mdp_core_clk";
+//#ifdef OPLUS_FEATURE_DISPLAY
+	vci_sec-supply = <&L3C>;
+//#endif /* OPLUS_FEATURE_DISPLAY */
 
 	vddio-supply = <&L12C>;
 	vci-supply = <&L13C>;
+	//extvdd-supply = <&L1D>;
 };
 
 &sde_dsi1 {
@@ -76,10 +92,43 @@
 			"pll_byte_clk1", "pll_dsi_clk1",
 			"mdp_core_clk";
 
+//#ifdef OPLUS_FEATURE_DISPLAY
+	vci_sec-supply = <&L3C>;
+//#endif /* OPLUS_FEATURE_DISPLAY */
+
 	vddio-supply = <&L12C>;
 	vci-supply = <&L13C>;
+	//extvdd-supply = <&L1D>;
 };
 
 &mdss_mdp {
-	connectors = <&sde_dsi &sde_dsi1 &smmu_sde_unsec &smmu_sde_sec &sde_wb &sde_rscc>;
+	connectors = <&sde_dsi &sde_dsi1 &smmu_sde_unsec &smmu_sde_sec &sde_wb &sde_rscc &sde_dp>;
+};
+
+&dsi_r66451_amoled_cmd {
+	qcom,ulps-enabled;
+};
+
+&dsi_r66451_amoled_cmd_cphy {
+        qcom,ulps-enabled;
+};
+
+&dsi_r66451_amoled_120hz_cmd_cphy {
+        qcom,ulps-enabled;
+};
+
+&dsi_r66451_amoled_144hz_cmd {
+	qcom,ulps-enabled;
+};
+
+&dsi_r66451_amoled_144hz_cmd_cphy {
+        qcom,ulps-enabled;
+};
+
+&dsi_sim_dsc_375_cmd {
+	qcom,ulps-enabled;
+};
+
+&dsi_sim_dsc_10b_cmd {
+	qcom,ulps-enabled;
 };

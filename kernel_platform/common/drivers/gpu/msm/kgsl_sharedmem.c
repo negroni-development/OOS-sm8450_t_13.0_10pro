@@ -132,6 +132,20 @@ static ssize_t mem_entry_sysfs_show(struct kobject *kobj,
 	return pattr->show(priv, pattr->memtype, buf);
 }
 
+struct deferred_work {
+	struct kgsl_process_private *private;
+	struct work_struct work;
+};
+
+static void process_private_deferred_put(struct work_struct *work)
+{
+	struct deferred_work *free_work =
+		container_of(work, struct deferred_work, work);
+
+	kgsl_process_private_put(free_work->private);
+	kfree(free_work);
+}
+
 static ssize_t memtype_sysfs_show(struct kobject *kobj,
 	struct attribute *attr, char *buf)
 {
@@ -140,9 +154,29 @@ static ssize_t memtype_sysfs_show(struct kobject *kobj,
 	struct kgsl_mem_entry *entry;
 	u64 size = 0;
 	int id = 0;
+	struct deferred_work *work = kzalloc(sizeof(struct deferred_work),
+			GFP_KERNEL);
+
+	if (!work)
+		return -ENOMEM;
 
 	priv = container_of(kobj, struct kgsl_process_private, kobj_memtype);
 	memtype = container_of(attr, struct kgsl_memtype, attr);
+
+	/*
+	 * Take a process refcount here and put it back in a deferred manner.
+	 * This is to avoid a deadlock where we put back last reference of the
+	 * process private (via kgsl_mem_entry_put) here and end up trying to
+	 * remove sysfs kobject while we are still in the middle of reading one
+	 * of the sysfs files.
+	 */
+	if (!kgsl_process_private_get(priv)) {
+		kfree(work);
+		return -ENOENT;
+	}
+
+	work->private = priv;
+	INIT_WORK(&work->work, process_private_deferred_put);
 
 	spin_lock(&priv->mem_lock);
 	for (entry = idr_get_next(&priv->mem_idr, &id); entry;
@@ -165,6 +199,8 @@ static ssize_t memtype_sysfs_show(struct kobject *kobj,
 	}
 	spin_unlock(&priv->mem_lock);
 
+	queue_work(kgsl_driver.mem_workqueue, &work->work);
+
 	return scnprintf(buf, PAGE_SIZE, "%llu\n", size);
 }
 
@@ -184,6 +220,26 @@ imported_mem_show(struct kgsl_process_private *priv,
 	struct kgsl_mem_entry *entry;
 	uint64_t imported_mem = 0;
 	int id = 0;
+	struct deferred_work *work = kzalloc(sizeof(struct deferred_work),
+		GFP_KERNEL);
+
+	if (!work)
+		return -ENOMEM;
+
+	/*
+	 * Take a process refcount here and put it back in a deferred manner.
+	 * This is to avoid a deadlock where we put back last reference of the
+	 * process private (via kgsl_mem_entry_put) here and end up trying to
+	 * remove sysfs kobject while we are still in the middle of reading one
+	 * of the sysfs files.
+	 */
+	if (!kgsl_process_private_get(priv)) {
+		kfree(work);
+		return -ENOENT;
+	}
+
+	work->private = priv;
+	INIT_WORK(&work->work, process_private_deferred_put);
 
 	spin_lock(&priv->mem_lock);
 	for (entry = idr_get_next(&priv->mem_idr, &id); entry;
@@ -217,6 +273,8 @@ imported_mem_show(struct kgsl_process_private *priv,
 		spin_lock(&priv->mem_lock);
 	}
 	spin_unlock(&priv->mem_lock);
+
+	queue_work(kgsl_driver.mem_workqueue, &work->work);
 
 	return scnprintf(buf, PAGE_SIZE, "%llu\n", imported_mem);
 }
@@ -1584,43 +1642,50 @@ int kgsl_allocate_kernel(struct kgsl_device *device,
 	return 0;
 }
 
+int kgsl_memdesc_init_fixed(struct kgsl_device *device,
+		struct platform_device *pdev, const char *resource,
+		struct kgsl_memdesc *memdesc)
+{
+	u32 entry[2];
+
+	if (of_property_read_u32_array(pdev->dev.of_node,
+		resource, entry, 2))
+		return -ENODEV;
+
+	kgsl_memdesc_init(device, memdesc, 0);
+	memdesc->physaddr = entry[0];
+	memdesc->size = entry[1];
+
+	return kgsl_memdesc_sg_dma(memdesc, entry[0], entry[1]);
+}
+
 struct kgsl_memdesc *kgsl_allocate_global_fixed(struct kgsl_device *device,
 		const char *resource, const char *name)
 {
-	struct kgsl_global_memdesc *md;
-	u32 entry[2];
+	struct kgsl_global_memdesc *gmd = kzalloc(sizeof(*gmd), GFP_KERNEL);
 	int ret;
 
-	if (of_property_read_u32_array(device->pdev->dev.of_node,
-		resource, entry, 2))
-		return ERR_PTR(-ENODEV);
-
-	md = kzalloc(sizeof(*md), GFP_KERNEL);
-	if (!md)
+	if (!gmd)
 		return ERR_PTR(-ENOMEM);
 
-	kgsl_memdesc_init(device, &md->memdesc, 0);
-	md->memdesc.priv = KGSL_MEMDESC_GLOBAL;
-	md->memdesc.physaddr = entry[0];
-	md->memdesc.size = entry[1];
-
-	ret = kgsl_memdesc_sg_dma(&md->memdesc, entry[0], entry[1]);
+	ret = kgsl_memdesc_init_fixed(device, device->pdev, resource,
+			&gmd->memdesc);
 	if (ret) {
-		kfree(md);
+		kfree(gmd);
 		return ERR_PTR(ret);
 	}
 
-	md->name = name;
+	gmd->memdesc.priv = KGSL_MEMDESC_GLOBAL;
+	gmd->name = name;
 
 	/*
 	 * No lock here, because this function is only called during probe/init
 	 * while the caller is holding the mutex
 	 */
-	list_add_tail(&md->node, &device->globals);
+	list_add_tail(&gmd->node, &device->globals);
+	kgsl_mmu_map_global(device, &gmd->memdesc, 0);
 
-	kgsl_mmu_map_global(device, &md->memdesc, 0);
-
-	return &md->memdesc;
+	return &gmd->memdesc;
 }
 
 static struct kgsl_memdesc *

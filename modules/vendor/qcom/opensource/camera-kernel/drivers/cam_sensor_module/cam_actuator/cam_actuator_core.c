@@ -871,6 +871,11 @@ int32_t cam_actuator_driver_cmd(struct cam_actuator_ctrl_t *a_ctrl,
 
 		actuator_acq_dev.device_handle =
 			cam_create_device_hdl(&bridge_params);
+		if (actuator_acq_dev.device_handle <= 0) {
+			rc = -EFAULT;
+			CAM_ERR(CAM_ACTUATOR, "Can not create device handle");
+			goto release_mutex;
+		}
 		a_ctrl->bridge_intf.device_hdl = actuator_acq_dev.device_handle;
 		a_ctrl->bridge_intf.session_hdl =
 			actuator_acq_dev.session_handle;
@@ -896,21 +901,21 @@ int32_t cam_actuator_driver_cmd(struct cam_actuator_ctrl_t *a_ctrl,
 			goto release_mutex;
 		}
 
-		if (a_ctrl->cam_act_state == CAM_ACTUATOR_CONFIG) {
-			rc = cam_actuator_power_down(a_ctrl);
-			if (rc < 0) {
-				CAM_ERR(CAM_ACTUATOR,
-					"Actuator Power down failed");
-				goto release_mutex;
-			}
-		}
-
 		if (a_ctrl->bridge_intf.device_hdl == -1) {
 			CAM_ERR(CAM_ACTUATOR, "link hdl: %d device hdl: %d",
 				a_ctrl->bridge_intf.device_hdl,
 				a_ctrl->bridge_intf.link_hdl);
 			rc = -EINVAL;
 			goto release_mutex;
+		}
+
+		if (a_ctrl->cam_act_state == CAM_ACTUATOR_CONFIG) {
+			rc = cam_actuator_power_down(a_ctrl);
+			if (rc < 0) {
+				CAM_ERR(CAM_ACTUATOR,
+					"Actuator Power Down Failed");
+				goto release_mutex;
+			}
 		}
 
 		if (a_ctrl->bridge_intf.link_hdl != -1) {

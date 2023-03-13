@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #ifndef _CAM_REQ_MGR_CORE_H_
 #define _CAM_REQ_MGR_CORE_H_
@@ -19,6 +20,7 @@
 #define CAM_REQ_MGR_WATCHDOG_TIMEOUT_MAX      50000
 #define CAM_REQ_MGR_SCHED_REQ_TIMEOUT         1000
 #define CAM_REQ_MGR_SIMULATE_SCHED_REQ        30
+#define CAM_REQ_MGR_DEFAULT_HDL_VAL           0
 
 #define FORCE_DISABLE_RECOVERY  2
 #define FORCE_ENABLE_RECOVERY   1
@@ -180,6 +182,10 @@ struct cam_req_mgr_traverse {
 	struct cam_req_mgr_apply          *apply_data;
 	struct cam_req_mgr_req_queue      *in_q;
 	bool                               validate_only;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	//lanhe add for use RDI for sensor apply
+	bool                               rdi_traverse;
+#endif
 	uint32_t                           open_req_cnt;
 };
 
@@ -208,6 +214,11 @@ struct crm_tbl_slot_special_ops {
 	int32_t dev_hdl;
 	bool apply_at_eof;
 	bool is_applied;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	//lanhe add for use RDI for sensor apply
+	uint32_t use_rdi_sof_apply;  //set by devices which need use RDI SOF for apply
+	uint32_t rdi_sof_applied;    //set while device was apply by RDI SOF
+#endif
 };
 
 /**
@@ -292,6 +303,11 @@ struct cam_req_mgr_req_queue {
 	int32_t                     num_slots;
 	struct cam_req_mgr_slot     slot[MAX_REQ_SLOTS];
 	int32_t                     rd_idx;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	//lanhe add
+	int32_t                     rdi_rd_idx;
+	int32_t                     rdi_skip_idx;
+#endif
 	int32_t                     wr_idx;
 	int32_t                     last_applied_idx;
 };
@@ -312,6 +328,10 @@ struct cam_req_mgr_req_data {
 	int32_t                       num_tbl;
 	struct cam_req_mgr_apply      apply_data[CAM_PIPELINE_DELAY_MAX];
 	struct cam_req_mgr_apply      prev_apply_data[CAM_PIPELINE_DELAY_MAX];
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	//lanhe add
+	struct cam_req_mgr_apply      rdi_apply_data[CAM_PIPELINE_DELAY_MAX];
+#endif
 	struct mutex                  lock;
 };
 

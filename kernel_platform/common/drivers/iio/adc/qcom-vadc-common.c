@@ -536,6 +536,14 @@ static int qcom_vadc7_scale_hw_calib_therm(
 				const struct vadc_prescale_ratio *prescale,
 				const struct adc5_data *data,
 				u16 adc_code, int *result_mdec);
+static int qcom_vadc7_scale_hw_calib_resistance(
+				const struct vadc_prescale_ratio *prescale,
+				const struct adc5_data *data,
+				u16 adc_code, int *result_mdec);
+static int qcom_vadc7_scale_hw_calib_therm_pmr_comp(
+				const struct vadc_prescale_ratio *prescale,
+				const struct adc5_data *data,
+				u16 adc_code, int *result_mdec);
 static int qcom_vadc_scale_hw_calib_batt_therm_100(
 				const struct vadc_prescale_ratio *prescale,
 				const struct adc5_data *data,
@@ -605,6 +613,10 @@ static struct qcom_adc5_scale_type scale_adc5_fn[] = {
 	[SCALE_HW_CALIB_PM2250_S3_DIE_TEMP] = {qcom_vadc_scale_hw_pm2250_s3_die_temp},
 	[SCALE_HW_CALIB_PM7_SMB_TEMP] = {qcom_vadc_scale_hw_pm7_smb_temp},
 	[SCALE_HW_CALIB_PM7_CHG_TEMP] = {qcom_vadc_scale_hw_pm7_chg_temp},
+	[SCALE_HW_CALIB_RESISTANCE_100K_PU_PM7] = {
+					qcom_vadc7_scale_hw_calib_resistance},
+	[SCALE_HW_CALIB_THERM_PMR_COMP_100K_PU_PM7] = {
+					qcom_vadc7_scale_hw_calib_therm_pmr_comp},
 };
 
 static int qcom_vadc_map_voltage_temp(const struct vadc_map_pt *pts,
@@ -801,6 +813,53 @@ static int qcom_vadc7_scale_hw_calib_therm(
 		return ret;
 
 	*result_mdec = result;
+
+	return 0;
+}
+
+static int qcom_vadc7_scale_hw_calib_therm_pmr_comp(
+				const struct vadc_prescale_ratio *prescale,
+				const struct adc5_data *data,
+				u16 adc_code, int *result_mdec)
+{
+	s64 resistance = adc_code;
+	int ret, result;
+
+	if (adc_code >= RATIO_MAX_ADC7)
+		return -EINVAL;
+
+	/* (ADC code * R_PULLUP (100Kohm)) / (full_scale_code - ADC code)*/
+	resistance *= R_PU_100K;
+	resistance = div64_s64(resistance, RATIO_MAX_ADC7 - adc_code);
+
+	resistance = div64_s64((resistance * R_PMR_COMP), R_PMR_COMP - resistance);
+
+	ret = qcom_vadc_map_voltage_temp(adcmap7_100k,
+				 ARRAY_SIZE(adcmap7_100k),
+				 resistance, &result);
+	if (ret)
+		return ret;
+
+	*result_mdec = result;
+
+	return 0;
+}
+
+static int qcom_vadc7_scale_hw_calib_resistance(
+				const struct vadc_prescale_ratio *prescale,
+				const struct adc5_data *data,
+				u16 adc_code, int *result_mdec)
+{
+	s64 resistance = adc_code;
+
+	if (adc_code >= RATIO_MAX_ADC7)
+		return -EINVAL;
+
+	/* (ADC code * R_PULLUP (100Kohm)) / (full_scale_code - ADC code)*/
+	resistance *= R_PU_100K;
+	resistance = div64_s64(resistance, (RATIO_MAX_ADC7 - adc_code));
+
+	*result_mdec = (int)resistance;
 
 	return 0;
 }

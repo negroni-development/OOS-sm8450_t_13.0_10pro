@@ -6,7 +6,7 @@
 
 #include <linux/seq_file.h>
 #include <drivers/android/binder_internal.h>
-
+#include <linux/kernel.h>
 #include "sched_assist.h"
 #include "sa_common.h"
 #include "sa_binder.h"
@@ -25,6 +25,7 @@ static inline void binder_set_inherit_ux(struct task_struct *thread_task, struct
 	}  else if (from_task && test_task_is_rt(from_task)) { /* rt trans can be set as ux if binder thread is cfs class */
 		if (!test_task_ux(thread_task)) {
 			int ux_value = SA_TYPE_LIGHT;
+
 			set_inherit_ux(thread_task, INHERIT_UX_BINDER, from_depth, ux_value);
 		}
 	}
@@ -32,26 +33,13 @@ static inline void binder_set_inherit_ux(struct task_struct *thread_task, struct
 
 static inline void binder_unset_inherit_ux(struct task_struct *thread_task)
 {
-	if (test_inherit_ux(thread_task, INHERIT_UX_BINDER)) {
+	if (test_inherit_ux(thread_task, INHERIT_UX_BINDER))
 		unset_inherit_ux(thread_task, INHERIT_UX_BINDER);
-	}
 }
 
 /* implement vender hook in driver/android/binder.c */
 void android_vh_binder_wakeup_ilocked_handler(void *unused, struct task_struct *task, bool sync, struct binder_proc *proc)
 {
-#ifndef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM
-	if (unlikely(!global_sched_assist_enabled))
-		return;
-
-	if (!task)
-		return;
-
-	if (sync) {
-		binder_set_inherit_ux(task, current, sync);
-		return;
-	}
-#endif
 }
 
 void android_vh_binder_restore_priority_handler(void *unused, struct binder_transaction *t, struct task_struct *task)
@@ -59,9 +47,8 @@ void android_vh_binder_restore_priority_handler(void *unused, struct binder_tran
 	if (unlikely(!global_sched_assist_enabled))
 		return;
 
-	if (t != NULL) {
+	if (t != NULL)
 		binder_unset_inherit_ux(task);
-	}
 }
 
 void android_vh_binder_wait_for_work_handler(void *unused,
@@ -70,9 +57,8 @@ void android_vh_binder_wait_for_work_handler(void *unused,
 	if (unlikely(!global_sched_assist_enabled))
 		return;
 
-	if (do_proc_work) {
+	if (do_proc_work)
 		binder_unset_inherit_ux(tsk->task);
-	}
 }
 
 void android_vh_sync_txn_recvd_handler(void *unused, struct task_struct *tsk, struct task_struct *from)
@@ -91,7 +77,6 @@ void android_vh_binder_priority_skip_handler(void *unused, struct task_struct *t
 }
 #endif
 
-#ifdef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM
 void android_vh_binder_proc_transaction_end_handler(void *unused, struct task_struct *caller_task, struct task_struct *binder_proc_task,
 		struct task_struct *binder_th_task, unsigned int code,
 		bool pending_async, bool sync)
@@ -101,6 +86,15 @@ void android_vh_binder_proc_transaction_end_handler(void *unused, struct task_st
 
 	if (unlikely(!global_sched_assist_enabled))
 		return;
+	if (sync && (!strncmp(binder_proc_task->comm, "servicemanager", TASK_COMM_LEN)
+				|| !strncmp(binder_proc_task->comm, "hwservicemanager", TASK_COMM_LEN))) {
+		binder_set_inherit_ux(binder_proc_task, current, sync);
+		if (unlikely(global_debug_enabled & DEBUG_FTRACE)) {
+		trace_printk("caller_task(comm=%-12s pid=%d tgid=%d) binder_proc_task(comm=%-12s pid=%d tgid=%d) code=%d sync=%d\n",
+			caller_task->comm, caller_task->pid, caller_task->tgid,
+			binder_proc_task->comm, binder_proc_task->pid, binder_proc_task->tgid, code, sync);
+		}
+        }
 
 	if (!binder_th_task)
 		return;
@@ -108,14 +102,13 @@ void android_vh_binder_proc_transaction_end_handler(void *unused, struct task_st
 	grp_leader = binder_th_task->group_leader;
 	if (grp_leader) {
 		struct oplus_task_struct *ots = get_oplus_task_struct(current);
-		if ((ots->im_flag == IM_FLAG_SURFACEFLINGER) && !sync && test_task_ux(grp_leader)) {
+
+		if ((ots->im_flag == IM_FLAG_SURFACEFLINGER) && !sync && test_task_ux(grp_leader))
 			set_ux = true;
-		}
 	}
 
-	if (set_ux) {
+	if (set_ux)
 		binder_set_inherit_ux(binder_th_task, current, sync);
-	}
 
 	if (unlikely(global_debug_enabled & DEBUG_FTRACE)) {
 		trace_printk("caller_task(comm=%-12s pid=%d tgid=%d) binder_proc_task(comm=%-12s pid=%d tgid=%d) binder_th_task(comm=%-12s pid=%d tgid=%d) code=%d sync=%d\n",
@@ -125,4 +118,3 @@ void android_vh_binder_proc_transaction_end_handler(void *unused, struct task_st
 			code, sync);
 	}
 }
-#endif

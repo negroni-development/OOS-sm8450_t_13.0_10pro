@@ -2,12 +2,12 @@
 
 LOCAL_PATH := $(call my-dir)
 
-ifeq ($(call is-board-platform, taro),true)
+ifeq ($(call is-board-platform, taro parrot),true)
 AUDIO_SELECT  := CONFIG_SND_SOC_WAIPIO=m
 endif
 
 # Build/Package only in case of supported target
-ifeq ($(call is-board-platform-in-list,taro kalama), true)
+ifeq ($(call is-board-platform-in-list,taro kalama parrot), true)
 
 LOCAL_PATH := $(call my-dir)
 
@@ -338,3 +338,7 @@ include $(DLKM_DIR)/Build_external_kernelmodule.mk
 
 endif # DLKM check
 endif # supported target check
+
+#ifdef OPLUS_ARCH_EXTENDS
+-include $(LOCAL_PATH)/oplus/build.mk
+#endif /* OPLUS_ARCH_EXTENDS */

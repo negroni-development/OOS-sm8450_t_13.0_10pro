@@ -11,7 +11,7 @@
 struct frame_info global_frame_info;
 unsigned long prev_real_util = 0;
 extern atomic_t start_frame;
-bool isHighFps = false;
+bool ishighfps = false;
 bool use_vload = false;
 bool up_migrate = false;
 u64 last_migrate_time = 0;
@@ -42,7 +42,7 @@ void set_frame_rate(unsigned int frame_rate)
 		return;
 
 	if (frame_rate > 60) {
-		isHighFps = true;
+		ishighfps = true;
 		if (frame_rate == 120) {
 			max_exec_time = 4000000;
 			timeout_load = 205;
@@ -51,7 +51,7 @@ void set_frame_rate(unsigned int frame_rate)
 			timeout_load = 238;
 		}
 	} else {
-		isHighFps = false;
+		ishighfps = false;
 		max_exec_time = 12000000;
 		timeout_load = 1024;
 	}
@@ -202,16 +202,16 @@ int set_frame_status(unsigned long status)
 		return ret;
 
 	switch (status) {
-		case FRAME_START:
-			/* collect frame_info when frame_end timestamp comming */
-			set_frame_start(frame_info);
-			break;
-		case FRAME_END:
-			/* FRAME_END  status should only set and update freq once */
-			if (unlikely(frame_info->status == FRAME_END))
-				return 0;
-			set_frame_end(frame_info, false);
-			break;
+	case FRAME_START:
+		/* collect frame_info when frame_end timestamp comming */
+		set_frame_start(frame_info);
+		break;
+	case FRAME_END:
+		/* FRAME_END  status should only set and update freq once */
+		if (unlikely(frame_info->status == FRAME_END))
+			return 0;
+		set_frame_end(frame_info, false);
+		break;
 	}
 
 	frame_boost(frame_info);
@@ -261,10 +261,8 @@ void set_frame_sched_state(bool enable)
 			return;
 
 		atomic_set(&start_frame, 0);
-		//(void)sched_set_group_normalized_util(0);
 		frame_info->status = FRAME_END;
 	}
-
 }
 
 void update_frame_state(int pid, bool in_frame)
@@ -374,67 +372,66 @@ void update_frame_info_tick(struct frame_boost_group *grp, u64 wallclock,  struc
 	exec = wallclock - wts->last_wake_ts;
 
 	switch (frame_info->status) {
-		case FRAME_INVALID:
-		case FRAME_END:
-			if (timeline >= frame_info->frame_interval) {
-				/*
-				 * fake FRAME_END here to rollover frame_window.
-				 * set_frame_timestamp(FRAME_END);
-				 */
-				sched_set_group_window_rollover();
-				set_frame_end(frame_info, true);
-			} else {
-				frame_info->frame_vload = calc_frame_load(frame_info, true);
-				frame_info->frame_util = calc_frame_util(frame_info);
-			}
-			break;
-		case FRAME_START:
-			/* check frame_util invalid */
-			if (!check_frame_util_invalid(frame_info, timeline)) {
-				int interval_time = frame_info->frame_interval / NSEC_PER_MSEC;
-				frame_info->frame_vload = calc_frame_vload(frame_info, timeline);
-				vload = frame_info->frame_vload;
+	case FRAME_INVALID:
+	case FRAME_END:
+		if (timeline >= frame_info->frame_interval) {
+			/*
+			 * fake FRAME_END here to rollover frame_window.
+			 * set_frame_timestamp(FRAME_END);
+			 */
+			sched_set_group_window_rollover();
+			set_frame_end(frame_info, true);
+		} else {
+			frame_info->frame_vload = calc_frame_load(frame_info, true);
+			frame_info->frame_util = calc_frame_util(frame_info);
+		}
+		break;
+	case FRAME_START:
+		/* check frame_util invalid */
+		if (!check_frame_util_invalid(frame_info, timeline)) {
+			int interval_time = frame_info->frame_interval / NSEC_PER_MSEC;
+			frame_info->frame_vload = calc_frame_vload(frame_info, timeline);
+			vload = frame_info->frame_vload;
 
-				/* add for continuous execution*/
-				if (!use_vload && exec >= max_exec_time && timeline >= max_exec_time) {
+			/* add for continuous execution*/
+			if (!use_vload && exec >= max_exec_time && timeline >= max_exec_time) {
+				use_vload = true;
+				/* if task migrates from silver cluster to gold cluster, update cpufreq after next tick  */
+				if ((num_sched_clusters >= min_clusters) &&
+					(prev_cpu < cpumask_first(&sched_cluster[1]->cpus))) {
+					up_migrate = true;
+					last_migrate_time = wallclock;
+				}
+			}
+
+			if (frame_info->max_vload_time >= interval_time) {
+				curr_load = calc_frame_load(frame_info, false);
+				critical_time = max_exec_time + (max_exec_time >> 1);
+				critical_load = (vload >> 1) + (vload >> 2);
+
+				/* add for discontinuous execution*/
+				if (!use_vload && timeline >= critical_time && curr_load >= 358) {
 					use_vload = true;
-					/* if task migrates from silver cluster to gold cluster, update cpufreq after next tick  */
-					if ((num_sched_clusters >= min_clusters) &&
-						(prev_cpu < cpumask_first(&sched_cluster[1]->cpus))) {
-						up_migrate = true;
-						last_migrate_time = wallclock;
-					}
 				}
 
-				if (frame_info->max_vload_time >= interval_time) {
-					curr_load = calc_frame_load(frame_info, false);
-					critical_time = max_exec_time + (max_exec_time >> 1);
-					critical_load = (vload >> 1) + (vload >> 2);
-
-					/* add for discontinuous execution*/
-					if (!use_vload && timeline >= critical_time && curr_load >= 358) {
-						use_vload = true;
-					}
-
-
-					if ((curr_load <= critical_load) && !use_vload) {
-						frame_info->frame_vload = curr_load;
-					}
-					frame_info->frame_vload = max(curr_load, frame_info->frame_vload);
+				if ((curr_load <= critical_load) && !use_vload) {
+					frame_info->frame_vload = curr_load;
 				}
-				frame_info->frame_util = calc_frame_util(frame_info);
-			} else {
-				frame_info->status = FRAME_INVALID;
-				/*
-				 * trigger FRAME_END to rollover frame window,
-				 * we treat FRAME_INVALID as FRAME_END.
-				 */
-				sched_set_group_window_rollover();
-				set_frame_end(frame_info, false);
+				frame_info->frame_vload = max(curr_load, frame_info->frame_vload);
 			}
-			break;
-		default:
-			return;
+			frame_info->frame_util = calc_frame_util(frame_info);
+		} else {
+			frame_info->status = FRAME_INVALID;
+			/*
+			 * trigger FRAME_END to rollover frame window,
+			 * we treat FRAME_INVALID as FRAME_END.
+			 */
+			sched_set_group_window_rollover();
+			set_frame_end(frame_info, false);
+		}
+		break;
+	default:
+		return;
 	}
 
 	frame_boost(frame_info);

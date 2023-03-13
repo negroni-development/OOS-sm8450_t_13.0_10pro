@@ -25,6 +25,7 @@
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/swap.h>
+#include <linux/spinlock.h>
 #include <uapi/linux/sched/types.h>
 
 #include "oplus_boost_pool.h"
@@ -45,7 +46,7 @@ static const unsigned int orders[] = {8, 4, 0};
 #define NUM_ORDERS ARRAY_SIZE(orders)
 #endif
 
-//#define BOOSTPOOL_DEBUG
+#define BOOSTPOOL_DEBUG
 
 #define MAX_BOOST_POOL_HIGH (1024 * 256)
 
@@ -54,6 +55,23 @@ static const unsigned int orders[] = {8, 4, 0};
 
 static LIST_HEAD(boost_pool_list);
 static DEFINE_MUTEX(boost_pool_list_lock);
+
+static unsigned long camera_pool_sz;
+
+#define DEFINE_BOOST_POOL_PROC_RW_ATTRIBUTE(__name)			\
+static int __name ## _open(struct inode *inode, struct file *file)	\
+{									\
+	struct dynamic_boost_pool *data = PDE_DATA(inode);		\
+	return single_open(file, __name ## _show, data);		\
+}									\
+									\
+static const struct proc_ops __name ## _proc_ops = {			\
+	.proc_open	= __name ## _open,				\
+	.proc_read	= seq_read,					\
+	.proc_write	= __name ## _write,				\
+	.proc_lseek	= seq_lseek,					\
+	.proc_release	= single_release,				\
+}
 
 /*
  * The selection of the orders used for allocation (1MB, 64K, 4K) is designed
@@ -76,7 +94,7 @@ static struct dynamic_page_pool *dynamic_page_pool_create_new(gfp_t gfp_mask, un
 	INIT_LIST_HEAD(&pool->high_items);
 	pool->gfp_mask = gfp_mask | __GFP_COMP;
 	pool->order = order;
-	mutex_init(&pool->mutex);
+	spin_lock_init(&pool->lock);
 
 	//mutex_lock(&pool_list_lock);
 	//list_add(&pool->list, &pool_list);
@@ -91,6 +109,7 @@ static void dynamic_page_pool_destroy_new(struct dynamic_page_pool *pool)
 	LIST_HEAD(pages);
 	int num_pages = 0;
 	int ret = DYNAMIC_POOL_SUCCESS;
+	unsigned long flags;
 
 	/* Remove us from the pool list */
 	//mutex_lock(&pool_list_lock);
@@ -98,7 +117,7 @@ static void dynamic_page_pool_destroy_new(struct dynamic_page_pool *pool)
 	//mutex_unlock(&pool_list_lock);
 
 	/* Free any remaining pages in the pool */
-	mutex_lock(&pool->mutex);
+	spin_lock_irqsave(&pool->lock, flags);
 	while (true) {
 		if (pool->low_count)
 			page = dynamic_page_pool_remove(pool, false);
@@ -110,7 +129,7 @@ static void dynamic_page_pool_destroy_new(struct dynamic_page_pool *pool)
 		list_add(&page->lru, &pages);
 		num_pages++;
 	}
-	mutex_unlock(&pool->mutex);
+	spin_unlock_irqrestore(&pool->lock, flags);
 
 	if (num_pages && pool->prerelease_callback)
 		ret = pool->prerelease_callback(pool, &pages, num_pages);
@@ -197,16 +216,20 @@ static inline void dmabuf_page_pool_free_pages(struct dmabuf_page_pool *pool,
 static struct page *dmabuf_page_pool_remove(struct dmabuf_page_pool *pool, int index)
 {
         struct page *page;
+        unsigned long flags;
 
-        mutex_lock(&pool->mutex);
+        spin_lock_irqsave(&pool->lock, flags);
         page = list_first_entry_or_null(&pool->items[index], struct page, lru);
         if (page) {
                 pool->count[index]--;
                 list_del(&page->lru);
                 mod_node_page_state(page_pgdat(page), NR_KERNEL_MISC_RECLAIMABLE,
                                     -(1 << pool->order));
+#if IS_ENABLED(CONFIG_QCOM_DMABUF_HEAPS_SYSTEM)
+		atomic64_sub(1 << pool->order, &qcom_dma_heap_pool);
+#endif /* CONFIG_QCOM_DMABUF_HEAPS_SYSTEM */
         }
-        mutex_unlock(&pool->mutex);
+        spin_unlock_irqrestore(&pool->lock, flags);
 
         return page;
 }
@@ -225,7 +248,7 @@ static struct dmabuf_page_pool *dmabuf_page_pool_create_new(gfp_t gfp_mask, unsi
         }
         pool->gfp_mask = gfp_mask | __GFP_COMP;
         pool->order = order;
-        mutex_init(&pool->mutex);
+        spin_lock_init(&pool->lock);
 
         //mutex_lock(&pool_list_lock);
         //list_add(&pool->list, &pool_list);
@@ -465,6 +488,9 @@ static struct page *dynamic_boost_pool_alloc(struct dynamic_boost_pool *pool,
 {
 	int i;
 	struct page *page;
+#ifdef CONFIG_QCOM_DMABUF_HEAPS_SYSTEM
+	unsigned long flags;
+#endif
 
 	if (NULL == pool) {
 		pr_err("%s: pool is NULL!\n", __func__);
@@ -477,12 +503,12 @@ static struct page *dynamic_boost_pool_alloc(struct dynamic_boost_pool *pool,
 		if (max_order < orders[i])
 			continue;
 #ifdef CONFIG_QCOM_DMABUF_HEAPS_SYSTEM
-		mutex_lock(&pool->pools[i]->mutex);
+		spin_lock_irqsave(&pool->pools[i]->lock, flags);
 		if (pool->pools[i]->high_count)
 			page = dynamic_page_pool_remove(pool->pools[i], true);
 		else if (pool->pools[i]->low_count)
 			page = dynamic_page_pool_remove(pool->pools[i], false);
-		mutex_unlock(&pool->pools[i]->mutex);
+		spin_unlock_irqrestore(&pool->pools[i]->lock, flags);
 #else
 		page = dmabuf_page_pool_alloc(pool->pools[i]);
 #endif
@@ -515,6 +541,11 @@ void dynamic_boost_pool_alloc_pack(struct dynamic_boost_pool *boost_pool, unsign
 
 	if (boost_pool == NULL)
 		return;
+
+	if (boost_pool->camera_pid && current->tgid != boost_pool->camera_pid) {
+		if (dynamic_boost_pool_nr_pages(boost_pool) < camera_pool_sz)
+			return;
+	}
 
 	while (*size_remaining_p > 0) {
 		/*
@@ -578,16 +609,18 @@ static int dynamic_page_pool_do_shrink(struct dynamic_page_pool *pool, gfp_t gfp
 		return dynamic_page_pool_total(pool, high);
 
 	while (freed < nr_to_scan) {
-		mutex_lock(&pool->mutex);
+		unsigned long flags;
+
+		spin_lock_irqsave(&pool->lock, flags);
 		if (pool->low_count) {
 			page = dynamic_page_pool_remove(pool, false);
 		} else if (high && pool->high_count) {
 			page = dynamic_page_pool_remove(pool, true);
 		} else {
-			mutex_unlock(&pool->mutex);
+			spin_unlock_irqrestore(&pool->lock, flags);
 			break;
 		}
-		mutex_unlock(&pool->mutex);
+		spin_unlock_irqrestore(&pool->lock, flags);
 		list_add(&page->lru, &pages);
 		freed += (1 << pool->order);
 	}
@@ -746,10 +779,12 @@ static int dynamic_boost_pool_shrink(gfp_t gfp_mask, int nr_to_scan)
 	int nr_freed;
 	int only_scan = 0;
 
+	if (!mutex_trylock(&boost_pool_list_lock))
+		return 0;
+
 	if (!nr_to_scan)
 		only_scan = 1;
 
-	mutex_lock(&boost_pool_list_lock);
 	list_for_each_entry(boost_pool, &boost_pool_list, list) {
 		if (only_scan) {
 			nr_total += dynamic_boost_pool_do_shrink(boost_pool,
@@ -1019,6 +1054,104 @@ static inline void set_cpumask(int end_cpu, struct cpumask *mask)
 		cpumask_set_cpu(i, mask);
 }
 
+/* limit max cpu here. in gki kernel CONFIG_NR_CPUS=32. */
+#define MAX_SUPPORT_CPUS (8)
+static ssize_t cpu_write(struct file *file, const char __user *buf,
+			 size_t count, loff_t *ppos)
+{
+	char buffer[13];
+	int err, cpu, i;
+	struct cpumask cpu_mask = { CPU_BITS_NONE };
+	struct dynamic_boost_pool *boost_pool = PDE_DATA(file_inode(file));
+
+	if (boost_pool == NULL)
+		return -EFAULT;
+
+	memset(buffer, 0, sizeof(buffer));
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+	err = kstrtoint(strstrip(buffer), 0, &cpu);
+	if (err)
+		return err;
+
+	if (cpu < 0 || cpu >= MAX_SUPPORT_CPUS)
+		return -EINVAL;
+
+	for (i = 0; i <= cpu; i++)
+		cpumask_set_cpu(i, &cpu_mask);
+
+	set_cpus_allowed_ptr(boost_pool->prefill_tsk, &cpu_mask);
+
+	pr_info("%s:%d set %s cpu [0-%d]\n",
+		current->comm, current->tgid,
+		boost_pool->prefill_tsk->comm, cpu);
+	return count;
+}
+
+static int cpu_show(struct seq_file *s, void *unused)
+{
+	struct dynamic_boost_pool *boost_pool = s->private;
+
+	seq_printf(s, "%*pbl\n",
+		   cpumask_pr_args(boost_pool->prefill_tsk->cpus_ptr));
+	return 0;
+}
+DEFINE_BOOST_POOL_PROC_RW_ATTRIBUTE(cpu);
+
+
+static ssize_t camera_pid_write(struct file *file, const char __user *buf,
+				size_t count, loff_t *ppos)
+{
+	char buffer[13];
+	struct task_struct *task;
+	int err, pid;
+	struct dynamic_boost_pool *boost_pool = PDE_DATA(file_inode(file));
+
+	if (boost_pool == NULL)
+		return -EFAULT;
+
+	memset(buffer, 0, sizeof(buffer));
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+	err = kstrtoint(strstrip(buffer), 0, &pid);
+	if (err)
+		return err;
+
+	if (pid == 0) {
+		boost_pool->camera_pid = 0;
+		pr_info("reset camera_pid\n");
+		return count;
+	}
+
+	rcu_read_lock();
+	task = find_task_by_vpid(pid);
+	if (task != NULL) {
+		pr_info("%s:%d set camera_pid %s:%d\n",
+			current->comm, current->tgid,
+			task->comm, task->tgid);
+		boost_pool->camera_pid = task->tgid;
+	}
+	rcu_read_unlock();
+
+	if (!task)
+		return -EINVAL;
+
+	return count;
+}
+
+static int camera_pid_show(struct seq_file *s, void *unused)
+{
+	struct dynamic_boost_pool *boost_pool = s->private;
+
+	seq_printf(s, "%d\n", boost_pool->camera_pid);
+	return 0;
+}
+DEFINE_BOOST_POOL_PROC_RW_ATTRIBUTE(camera_pid);
+
 static struct dynamic_boost_pool *dynamic_boost_pool_create(unsigned int nr_pages,
 					struct proc_dir_entry *root_dir,
 					char *name)
@@ -1029,6 +1162,7 @@ static struct dynamic_boost_pool *dynamic_boost_pool_create(unsigned int nr_page
 	struct cpumask mask;
 	int end_cpu = 3;
 	int ret = 0;
+	struct proc_dir_entry *proc_info, *proc_low_info, *proc_stat, *proc_pid, *proc_cpu;
 
 	if (NULL == root_dir) {
 		pr_err("%s: boost_pool dir not exits.\n", __func__);
@@ -1060,11 +1194,11 @@ static struct dynamic_boost_pool *dynamic_boost_pool_create(unsigned int nr_page
 	boost_pool->origin = boost_pool->high = boost_pool->low = nr_pages;
 	boost_pool->name = name;
 
-	boost_pool->proc_info = proc_create_data(name, 0666,
+	proc_info = proc_create_data(name, 0666,
 						 root_dir,
 						 &dynamic_boost_pool_proc_ops,
 						 boost_pool);
-	if (IS_ERR_OR_NULL(boost_pool->proc_info)) {
+	if (IS_ERR_OR_NULL(proc_info)) {
 		pr_info("Unable to initialise /proc/boost_pool/%s\n",
 			name);
 		goto destroy_pools;
@@ -1073,11 +1207,11 @@ static struct dynamic_boost_pool *dynamic_boost_pool_create(unsigned int nr_page
 	}
 
 	snprintf(buf, 128, "%s_low", name);
-	boost_pool->proc_low_info = proc_create_data(buf, 0666,
+	proc_low_info = proc_create_data(buf, 0666,
 						 root_dir,
 						 &dynamic_boost_pool_low_proc_ops,
 						 boost_pool);
-	if (IS_ERR_OR_NULL(boost_pool->proc_low_info)) {
+	if (IS_ERR_OR_NULL(proc_low_info)) {
 		pr_info("Unable to initialise /proc/boost_pool/%s_low\n",
 			name);
 		goto destroy_proc_info;
@@ -1087,11 +1221,11 @@ static struct dynamic_boost_pool *dynamic_boost_pool_create(unsigned int nr_page
 	}
 
 	snprintf(buf, 128, "%s_stat", name);
-	boost_pool->proc_stat = proc_create_data(buf, 0444,
+	proc_stat = proc_create_data(buf, 0444,
 						 root_dir,
 						 &dynamic_boost_pool_stat_proc_ops,
 						 boost_pool);
-	if (IS_ERR_OR_NULL(boost_pool->proc_stat)) {
+	if (IS_ERR_OR_NULL(proc_stat)) {
 		pr_info("Unable to initialise /proc/boost_pool/%s_stat\n",
 			name);
 		goto destroy_proc_low_info;
@@ -1100,13 +1234,29 @@ static struct dynamic_boost_pool *dynamic_boost_pool_create(unsigned int nr_page
 			name);
 	}
 
+	snprintf(buf, 128, "%s_cpu", name);
+	proc_cpu = proc_create_data(buf, 0666, root_dir, &cpu_proc_ops,
+				    boost_pool);
+	if (!proc_cpu) {
+		pr_err("create proc_fs cpu failed\n");
+		goto destroy_proc_stat;
+	}
+
+	snprintf(buf, 128, "%s_pid", name);
+	proc_pid = proc_create_data(buf, 0666, root_dir, &camera_pid_proc_ops,
+				    boost_pool);
+	if (!proc_pid) {
+		pr_err("create proc_fs cpu failed\n");
+		goto destroy_proc_cpu;
+	}
+
 	init_waitqueue_head(&boost_pool->waitq);
 	tsk = kthread_run(dynamic_boost_pool_kworkthread, boost_pool,
 			  "bp_%s", name);
 
 	if (IS_ERR_OR_NULL(tsk)) {
 		pr_err("%s: kthread_create failed!\n", __func__);
-		goto destroy_proc_stat;
+		goto destroy_proc_pid;
 	}
 	boost_pool->tsk = tsk;
 	/* FIXME, we should not use magic number.. */
@@ -1131,12 +1281,16 @@ static struct dynamic_boost_pool *dynamic_boost_pool_create(unsigned int nr_page
 	mutex_unlock(&boost_pool_list_lock);
 	return boost_pool;
 
+destroy_proc_pid:
+	proc_remove(proc_pid);
+destroy_proc_cpu:
+	proc_remove(proc_cpu);
 destroy_proc_stat:
-	proc_remove(boost_pool->proc_stat);
+	proc_remove(proc_stat);
 destroy_proc_low_info:
-	proc_remove(boost_pool->proc_low_info);
+	proc_remove(proc_low_info);
 destroy_proc_info:
-	proc_remove(boost_pool->proc_info);
+	proc_remove(proc_info);
 destroy_pools:
 	dynamic_boost_pool_destroy(boost_pool);
 
@@ -1152,14 +1306,16 @@ struct dynamic_boost_pool *dynamic_boost_pool_create_pack(void)
 
 	boost_root_dir = proc_mkdir("boost_pool", NULL);
 	if (!IS_ERR_OR_NULL(boost_root_dir)) {
-		unsigned long cam_sz = 64 * 256;
+		unsigned long pages_pool = SZ_32M >> PAGE_SHIFT;
 
 		/* on low memory target, we should not set 128Mib on camera pool. */
-		/* TODO set by total ram pages */
-		if (totalram_pages() > (SZ_4G >> PAGE_SHIFT))
-			cam_sz = 128 * 256;
+		if (totalram_pages() > (SZ_4G >> PAGE_SHIFT)) {
+			camera_pool_sz = SZ_128M >> PAGE_SHIFT;
+			pages_pool = (SZ_64M >> PAGE_SHIFT) + camera_pool_sz;
+		}
 
-		boost_pool = dynamic_boost_pool_create(cam_sz, boost_root_dir, "camera");
+		boost_pool = dynamic_boost_pool_create(pages_pool, boost_root_dir,
+						       "camera");
 		if (NULL == boost_pool)
 			pr_err("%s: create boost_pool camera failed!\n", __func__);
 	} else {

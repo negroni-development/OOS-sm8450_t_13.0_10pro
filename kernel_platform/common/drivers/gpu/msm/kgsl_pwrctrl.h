@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
+ * Copyright (c) 2010-2021, The Linux Foundation. All rights reserved.
  * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #ifndef __KGSL_PWRCTRL_H
@@ -67,6 +68,8 @@ struct kgsl_pwrlevel {
 	unsigned int bus_min;
 	unsigned int bus_max;
 	unsigned int acd_level;
+	/** @cx_level: CX vote */
+	u32 cx_level;
 	/** @voltage_level: Voltage level used by the GMU to vote RPMh */
 	u32 voltage_level;
 };
@@ -84,6 +87,7 @@ struct kgsl_pwrlevel {
  * @default_pwrlevel - device wake up power level
  * @max_pwrlevel - maximum allowable powerlevel per the user
  * @min_pwrlevel - minimum allowable powerlevel per the user
+ * @min_render_pwrlevel - minimum allowable powerlevel for rendering
  * @num_pwrlevels - number of available power levels
  * @throttle_mask - LM throttle mask
  * @interval_timeout - timeout to be idle before a power event
@@ -127,6 +131,7 @@ struct kgsl_pwrctrl {
 	unsigned int wakeup_maxpwrlevel;
 	unsigned int max_pwrlevel;
 	unsigned int min_pwrlevel;
+	unsigned int min_render_pwrlevel;
 	unsigned int num_pwrlevels;
 	unsigned int throttle_mask;
 	u32 interval_timeout;
@@ -137,6 +142,7 @@ struct kgsl_pwrctrl {
 	unsigned int bus_percent_ab;
 	unsigned int bus_width;
 	unsigned long bus_ab_mbytes;
+	u32 ddr_stall_percent;
 	/** @ddr_table: List of the DDR bandwidths in KBps for the target */
 	u32 *ddr_table;
 	/** @ddr_table_count: Number of objects in @ddr_table */
@@ -163,6 +169,8 @@ struct kgsl_pwrctrl {
 	u64 time_in_pwrlevel[KGSL_MAX_PWRLEVELS];
 	/** @last_stat_updated: The last time stats were updated */
 	ktime_t last_stat_updated;
+	/** @nb_max: Notifier block for DEV_PM_QOS_MAX_FREQUENCY */
+	struct notifier_block nb_max;
 };
 
 int kgsl_pwrctrl_init(struct kgsl_device *device);
@@ -216,7 +224,6 @@ void kgsl_pwrctrl_busy_time(struct kgsl_device *device, u64 time, u64 busy);
 void kgsl_pwrctrl_set_constraint(struct kgsl_device *device,
 			struct kgsl_pwr_constraint *pwrc, u32 id, u32 ts);
 int kgsl_pwrctrl_set_default_gpu_pwrlevel(struct kgsl_device *device);
-void kgsl_pwrctrl_update_thermal_pwrlevel(struct kgsl_device *device);
 
 /**
  * kgsl_pwrctrl_request_state - Request a specific power state

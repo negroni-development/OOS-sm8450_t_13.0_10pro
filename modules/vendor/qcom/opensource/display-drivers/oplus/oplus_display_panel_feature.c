@@ -18,8 +18,10 @@
 #include "oplus_bl.h"
 #include "oplus_adfr.h"
 #include "oplus_display_panel_feature.h"
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
 #include "oplus_onscreenfingerprint.h"
-#include "oplus_display_panel_hbm.h"
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 extern int lcd_closebl_flag;
 extern u32 oplus_last_backlight;
@@ -108,10 +110,12 @@ int oplus_panel_post_on_backlight(void *display, struct dsi_panel *panel, u32 bl
 
 	if ((bl_lvl == 0 && panel->bl_config.bl_level != 0) ||
 		(bl_lvl != 0 && panel->bl_config.bl_level == 0)) {
-		pr_info("backlight level changed %d -> %d\n",
+		pr_info("<%s> backlight level changed %d -> %d\n",
+				panel->oplus_priv.vendor_name,
 				panel->bl_config.bl_level, bl_lvl);
     } else if (panel->bl_config.bl_level == 1) {
-		pr_info("aod backlight level changed %d -> %d\n",
+		pr_info("<%s> aod backlight level changed %d -> %d\n",
+				panel->oplus_priv.vendor_name,
 				panel->bl_config.bl_level, bl_lvl);
 	}
 
@@ -152,46 +156,32 @@ u32 oplus_panel_silence_backlight(struct dsi_panel *panel, u32 bl_lvl)
 	if (lcd_closebl_flag) {
 		pr_err("silence reboot we should set backlight to zero\n");
 		bl_temp = 0;
-	} else if (bl_lvl) {
-		if (oplus_get_ofp_switch_mode() == OFP_SWITCH_OFF) {
-			oplus_set_ofp_switch_mode(OFP_SWITCH_ON);
-			DSI_DEBUG("oplus ofp switch on\n");
-		}
 	}
+
 	return bl_temp;
 }
 
-void oplus_panel_update_backlight(struct mipi_dsi_device *dsi, u32 bl_lvl)
+void oplus_panel_update_backlight(struct dsi_panel *panel,
+	struct mipi_dsi_device *dsi, u32 bl_lvl)
 {
 	int rc = 0;
 	u64 inverted_dbv_bl_lvl = 0;
-	struct dsi_display *dsi_display = get_main_display();
 
-	if (!dsi_display || !dsi_display->panel){
-		DSI_ERR("Oplus Features config No panel device\n");
-		return;
+	oplus_display_backlight_notifier(panel, bl_lvl);
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported()) {
+		if (oplus_ofp_backlight_filter(panel, bl_lvl)) {
+			return;
+		}
 	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
-	if ((get_oplus_display_scene() == OPLUS_DISPLAY_AOD_SCENE) && ( bl_lvl == 1)) {
-		pr_err("dsi_cmd AOD mode return bl_lvl:%d\n",bl_lvl);
-		return;
-	}
+	/*backlight value mapping */
+	oplus_display_panel_backlight_mapping(panel, &bl_lvl);
 
-	if (dsi_display->panel->is_hbm_enabled && (bl_lvl != 0))
-		return;
-
-	if((bl_lvl == 0) && oplus_display_get_hbm_mode()) {
-		pr_info("set backlight 0 and recovery hbm to 0\n");
-			__oplus_display_set_hbm(0);
-	}
-
-	if (oplus_display_get_hbm_mode()) {
-		return;
-	}
-
-	oplus_display_panel_backlight_mapping(dsi_display->panel, &bl_lvl);
-
-	if (dsi_display->panel->bl_config.bl_inverted_dbv)
+	/*will inverted display brightness value */
+	if (panel->bl_config.bl_inverted_dbv)
 		inverted_dbv_bl_lvl = (((bl_lvl & 0xff) << 8) | (bl_lvl >> 8));
 	else
 		inverted_dbv_bl_lvl = bl_lvl;
@@ -202,17 +192,56 @@ void oplus_panel_update_backlight(struct mipi_dsi_device *dsi, u32 bl_lvl)
 		if ((oplus_adfr_backlight_cmd_filter_get() == true) && (inverted_dbv_bl_lvl != 0)) {
 			DSI_INFO("kVRR filter backlight cmd\n");
 		} else {
-			mutex_lock(&dsi_display->panel->panel_tx_lock);
+			mutex_lock(&panel->panel_tx_lock);
 			rc = mipi_dsi_dcs_set_display_brightness(dsi, inverted_dbv_bl_lvl);
 			if (rc < 0)
 				DSI_ERR("failed to update dcs backlight:%d\n", bl_lvl);
-			mutex_unlock(&dsi_display->panel->panel_tx_lock);
+			mutex_unlock(&panel->panel_tx_lock);
 		}
 	} else {
 		rc = mipi_dsi_dcs_set_display_brightness(dsi, inverted_dbv_bl_lvl);
 		if (rc < 0)
 			DSI_ERR("failed to update dcs backlight:%d\n", bl_lvl);
 	}
-	oplus_last_backlight = bl_lvl;
 
+	oplus_last_backlight = bl_lvl;
 }
+
+void oplus_display_backlight_notifier(struct dsi_panel *panel, u32 bl_lvl)
+{
+	enum panel_event_notifier_tag panel_type;
+	u32 threshold = panel->bl_config.dc_backlight_threshold;
+	bool *dc_mode = &panel->bl_config.oplus_dc_mode;
+	struct dsi_display *display = oplus_display_get_current_display();
+
+	if (!display || !display->panel) {
+		DSI_ERR("Oplus Features config No panel device\n");
+		return;
+	}
+
+	if (!strcmp(display->display_type, "secondary")) {
+		panel_type = PANEL_EVENT_NOTIFICATION_SECONDARY;
+	} else {
+		panel_type = PANEL_EVENT_NOTIFICATION_PRIMARY;
+	}
+
+	if (*dc_mode && (bl_lvl > 1 && bl_lvl < threshold)) {
+		*dc_mode = false;
+		oplus_display_event_data_notifier_trigger(display,
+				panel_type,
+				DRM_PANEL_EVENT_DC_MODE,
+				*dc_mode);
+	} else if (!(*dc_mode) && bl_lvl >= threshold) {
+		*dc_mode = true;
+		oplus_display_event_data_notifier_trigger(display,
+				panel_type,
+				DRM_PANEL_EVENT_DC_MODE,
+				*dc_mode);
+	}
+
+	oplus_display_event_data_notifier_trigger(display,
+			panel_type,
+			DRM_PANEL_EVENT_BACKLIGHT,
+			bl_lvl);
+}
+

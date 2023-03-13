@@ -1,13 +1,26 @@
 //ifdef OPLUS_FEATURE_CHG_BASIC
-//Jianchao.Shi@BSP.CHG.Basic, 2021/05/29, sjc Add for charging, 1+
 
 #include "oplus_chg_21001.h"
 #include "oplus-chg-21001-fw.dtsi"
 
-//#ifdef OPLUS_FEATURE_CHG_BASIC /* Jianchao.Shi@BSP.CHG.Basic, 2020/05/20, sjc Add for charging */
 &soc {
 	oplus,adsp-voocphy {
 		compatible = "oplus,adsp-voocphy";
+	};
+};
+
+&soc {
+	oplus,track-charge {
+		compatible = "oplus,track-charge";
+		track,fast_chg_break_t_thd = <1400>;
+		track,general_chg_break_t_thd = <300>;
+		track,voocphy_type = <1>;
+		track,wls_max_power = <50000>;
+		track,wired_max_power = <65000>;
+		track,wls_bpp_chg_scheme = <0>;
+		track,wls_epp_chg_scheme = <0>;
+		track,wls_fast_chg_scheme = <0>;
+		track,wired_fast_chg_scheme = <1>;
 	};
 };
 
@@ -20,7 +33,7 @@
 };
 
 &battery_charger {
-	//for oppo chg framework:
+	//for oplus chg framework:
 	oplus,chg_ops = "plat-pmic";
 	qcom,smart_charging_screenoff;
 	qcom,voocphy_support = <1>;
@@ -217,6 +230,7 @@
 	qcom,chg_ctrl_by_camera;
 	qcom,sw_vfloat_over_protect_enable;
 	qcom,usbtemp_batttemp_gap = <12>;
+	qcom,fg_info_package_read_support;
 
 	//for PD9V or QC9V
 	//qcom,vbatt_pdqc_to_5v_thr = <4100>;
@@ -228,6 +242,9 @@
 	qcom,ui_soc_decimal_speedmin = <20>;//2A
 	qcom,otg_scheme = <0>;//0:cid 1:ccdetect_gpio 2:switch
 	//qcom,soft_aicl_in_adsp_support;
+	oplus,smooth_switch_v2;
+	oplus,reserve_chg_soc = <3>;
+	oplus,reserve_dis_soc = <3>;
 
 	qcom,dischg-gpio = <&pm8350c_gpios 9 0x00>;
 	qcom,otg-booster-en-gpio = <&tlmm 64 0x00>;
@@ -575,10 +592,7 @@
 		qcom,drive-strength = <2>;
 	};
 };
-//#endif OPLUS_FEATURE_CHG_BASIC
 
-
-//#ifdef OPLUS_FEATURE_CHG_BASIC /* Jianchao.Shi@BSP.CHG.Basic, 2020/05/20, sjc Add for charging */
 &battery_charger {
 	oplus,ic_type = <OPLUS_CHG_IC_BUCK>;
 	oplus,ic_index = <0>;
@@ -647,11 +661,12 @@
 		pinctrl-3 = <&ext_pwr_en_sleep>;
 
 		oplus,max-voltage-mv = <4550>;
-		oplus,fastchg_curr_max_ma = <2450>;
+		oplus,fastchg_curr_max_ma = <2400>;
 		oplus,verity_curr_max_ma = <2000>;
 		oplus,wls-fast-chg-call-on-curr-ma = <600>;
 		oplus,wls-fast-chg-camera-on-curr-ma = <600>;
 		oplus,wls_power_mw = <50000>;
+		oplus,wls_phone_id = <0x0A>;
 		/*
 		 * | temp_min | temp_max | target_curr_ma(mA) |
 		 *
@@ -740,16 +755,19 @@
 		cool-down-airsvooc = <0 400 950 750 750 1000 1250 1500 1500 1750 2000 2500 2500>;
 
 		/*
-		 * | curr_ma | fallback_step |
+		 * | curr_ma | fallback_step | switch_to_bpp
 		 * curr_ma: wls icl in this step
 		 * fallback_step: 0: don't fallback when CEP is OK
 		 *                1/2...: fallback to 1st/2nd step when CEP is OK
+		 * switch_to_bpp: reach the final step, switch to bpp when CEP is not OK
 		 */
-		skewing-epp-plus =	<1200 0
-					800 0
-					400 2>;//fallback to 800(2nd step) when CEP is OK at this step
-		skewing-airvooc =	<950 0
-					400 0>;
+		skewing-epp =		<800 0 0
+					400 0 0>;
+		skewing-epp-plus =	<1200 0 0
+					800 0 0
+					400 2 0>;//fallback to 800(2nd step) when CEP is OK at this step
+		skewing-airvooc =	<950 0 0
+					400 0 0>;
 
 		/* fod parameter*/
 		/*
@@ -770,7 +788,7 @@
 		oplus,vooc-vol-mv = <12000>;
 		oplus,svooc-vol-mv = <12000>;
 
-		oplus,fastchg-max-soc = <90>;
+		oplus,fastchg-max-soc = <94>;
 
 		/*
 		 * | temp_min | temp_max | target_curr_ma | vol_max_mv |need wait | soc_max |

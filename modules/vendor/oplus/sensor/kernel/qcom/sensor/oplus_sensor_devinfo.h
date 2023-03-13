@@ -72,6 +72,7 @@ enum  {
     TCS3701 = 0x02,
     TCS3408 = 0x04,
     STK3A6X = 0x08,
+    STK3329 = 0x10,
 };
 
 enum {
@@ -82,6 +83,10 @@ enum {
     LSM6DSO = 0x10,
     ICM4X6XX = 0x20,
     ICM4X607 = 0x40,
+    BMI3X0 = 0x80,
+    LIS2HH12 = 0x81,
+    BMA420 = 0x82,
+    SC7A20 = 0x84,
 };
 
 enum {

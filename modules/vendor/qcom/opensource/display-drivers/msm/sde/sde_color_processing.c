@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -18,10 +19,10 @@
 #include "sde_core_irq.h"
 #include "dsi_panel.h"
 #include "sde_hw_color_proc_common_v4.h"
-#ifdef OPLUS_BUG_STABILITY
-#include "../oplus/oplus_display_private_api.h"
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
 #include "../oplus/oplus_onscreenfingerprint.h"
-#endif
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 struct sde_cp_node {
 	u32 property_id;
@@ -173,6 +174,8 @@ static bool feature_handoff_mask[SDE_CP_CRTC_MAX_FEATURES] = {
 	[SDE_CP_CRTC_DSPP_SIXZONE] = 1,
 	[SDE_CP_CRTC_DSPP_GAMUT] = 1,
 	[SDE_CP_CRTC_DSPP_DITHER] = 1,
+	[SDE_CP_CRTC_DSPP_SPR_INIT] = 1,
+	[SDE_CP_CRTC_DSPP_DEMURA_INIT] = 1,
 };
 
 typedef void (*dspp_cap_update_func_t)(struct sde_crtc *crtc,
@@ -245,60 +248,28 @@ static int _set_dspp_vlut_feature(struct sde_hw_dspp *hw_dspp,
 	return ret;
 }
 
-#ifdef OPLUS_BUG_STABILITY
-extern int dc_apollo_enable;
-extern int oplus_dimlayer_hbm;
-#endif
-
 static int _set_dspp_pcc_feature(struct sde_hw_dspp *hw_dspp,
 				struct sde_hw_cp_cfg *hw_cfg,
 				struct sde_crtc *hw_crtc)
 {
 	int ret = 0;
-#ifdef OPLUS_BUG_STABILITY
-/* fix pcc abnormal on onscreenfinger scene */
-	struct sde_crtc_state *cstate;
-	struct drm_msm_pcc *save_pcc;
-	struct dsi_display *display;
 
-	if (!hw_cfg) {
-		return -EINVAL;
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported()) {
+		oplus_ofp_set_dspp_pcc_feature(hw_cfg, true);
 	}
-
-	save_pcc = hw_cfg->payload;
-	cstate = to_sde_crtc_state(hw_crtc->base.state);
-
-	if (!cstate) {
-		DRM_ERROR("set_dspp_pcc_feature invalid cstate %pK\n", cstate);
-		return -EINVAL;
-	}
-
-	display = get_main_display();
-	if (!display->panel->oplus_priv.dc_apollo_sync_enable || !dc_apollo_enable) {
-		if (OPLUS_DISPLAY_POWER_DOZE_SUSPEND == get_oplus_display_power_status() ||
-				OPLUS_DISPLAY_POWER_DOZE == get_oplus_display_power_status() ||
-				(cstate->aod_skip_pcc == true) ||
-				cstate->fingerprint_mode) {
-			hw_cfg->payload = NULL;
-		}
-	}
-	if (display->panel->oplus_priv.dc_apollo_sync_enable && dc_apollo_enable
-		&& ((OPLUS_DISPLAY_POWER_DOZE_SUSPEND == get_oplus_display_power_status()
-				|| OPLUS_DISPLAY_POWER_DOZE == get_oplus_display_power_status())
-			&& !oplus_dimlayer_hbm)) {
-		hw_cfg->payload = NULL;
-	}
-#endif
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 	if (!hw_dspp || !hw_dspp->ops.setup_pcc)
 		ret = -EINVAL;
 	else
 		hw_dspp->ops.setup_pcc(hw_dspp, hw_cfg);
 
-#ifdef OPLUS_BUG_STABILITY
-/* fix pcc abnormal on onscreenfinger scene */
-	hw_cfg->payload = save_pcc;
-#endif
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported()) {
+		oplus_ofp_set_dspp_pcc_feature(hw_cfg, false);
+	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 	return ret;
 }
@@ -1704,6 +1675,7 @@ static void _sde_cp_crtc_commit_feature(struct sde_cp_node *prop_node,
 	int i = 0, ret = 0;
 	bool feature_enabled = false;
 	struct sde_mdss_cfg *catalog = NULL;
+	struct sde_crtc_state *sde_crtc_state;
 
 	memset(&hw_cfg, 0, sizeof(hw_cfg));
 	_sde_cp_get_cached_payload(prop_node, &hw_cfg, &feature_enabled);
@@ -1715,6 +1687,13 @@ static void _sde_cp_crtc_commit_feature(struct sde_cp_node *prop_node,
 	hw_cfg.skip_blend_plane = sde_crtc->skip_blend_plane;
 	hw_cfg.skip_blend_plane_h = sde_crtc->skip_blend_plane_h;
 	hw_cfg.skip_blend_plane_w = sde_crtc->skip_blend_plane_w;
+
+	sde_crtc_state = to_sde_crtc_state(sde_crtc->base.state);
+	if (!sde_crtc_state) {
+		DRM_ERROR("invalid sde_crtc_state %pK\n", sde_crtc_state);
+		return;
+	}
+	hw_cfg.num_ds_enabled = sde_crtc_state->num_ds_enabled;
 
 	SDE_EVT32(hw_cfg.panel_width, hw_cfg.panel_height);
 
@@ -1745,6 +1724,14 @@ static void _sde_cp_crtc_commit_feature(struct sde_cp_node *prop_node,
 			hw_cfg.mixer_info = hw_lm;
 			hw_cfg.displayh = num_mixers * hw_lm->cfg.out_width;
 			hw_cfg.displayv = hw_lm->cfg.out_height;
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+			if (oplus_ofp_is_supported()) {
+				if (prop_node->feature == SDE_CP_CRTC_DSPP_GAMUT) {
+					oplus_ofp_bypass_dspp_gamut(&hw_cfg);
+				}
+			}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 			ret = commit_feature(hw_dspp, &hw_cfg, sde_crtc);
 			if (ret)
@@ -4956,7 +4943,7 @@ void sde_cp_crtc_enable(struct drm_crtc *drm_crtc)
 	if (!num_mixers)
 		return;
 	mutex_lock(&crtc->crtc_cp_lock);
-	info = kzalloc(sizeof(struct sde_kms_info), GFP_KERNEL);
+	info = vzalloc(sizeof(struct sde_kms_info));
 	if (info) {
 		for (i = 0; i < ARRAY_SIZE(dspp_cap_update_func); i++)
 			dspp_cap_update_func[i](crtc, info);
@@ -4965,7 +4952,7 @@ void sde_cp_crtc_enable(struct drm_crtc *drm_crtc)
 			info->data, SDE_KMS_INFO_DATALEN(info),
 			CRTC_PROP_DSPP_INFO);
 	}
-	kfree(info);
+	vfree(info);
 	mutex_unlock(&crtc->crtc_cp_lock);
 }
 
@@ -4980,7 +4967,7 @@ void sde_cp_crtc_disable(struct drm_crtc *drm_crtc)
 	}
 	crtc = to_sde_crtc(drm_crtc);
 	mutex_lock(&crtc->crtc_cp_lock);
-	info = kzalloc(sizeof(struct sde_kms_info), GFP_KERNEL);
+	info = vzalloc(sizeof(struct sde_kms_info));
 	if (info)
 		msm_property_set_blob(&crtc->property_info,
 				&crtc->dspp_blob_info,
@@ -4991,7 +4978,7 @@ void sde_cp_crtc_disable(struct drm_crtc *drm_crtc)
 	crtc->skip_blend_plane_h = 0;
 	crtc->skip_blend_plane_w = 0;
 	mutex_unlock(&crtc->crtc_cp_lock);
-	kfree(info);
+	vfree(info);
 }
 
 void sde_cp_clear_state_info(struct drm_crtc_state *state)

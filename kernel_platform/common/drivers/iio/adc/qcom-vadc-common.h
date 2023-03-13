@@ -61,6 +61,7 @@
 #define DIE_TEMP_ADC7_SCALE_2			20000
 #define DIE_TEMP_ADC7_SCALE_FACTOR		1000
 #define DIE_TEMP_ADC7_MAX			160000
+#define R_PMR_COMP		3670000
 
 /**
  * struct vadc_map_pt - Map the graph representation for ADC channel
@@ -156,6 +157,11 @@ struct vadc_prescale_ratio {
  *	S3 die temperature channel on PM2250.
  * SCALE_HW_CALIB_PM5_CUR: Returns result in microamperes for PMIC5 channels
  *	that use voltage scaling.
+ * SCALE_HW_CALIB_RESISTANCE_100K_PU_PM7: Returns channel resistance
+ *	in ohms using 100k pullup. The hardware applies offset/slope to adc code.
+ * SCALE_HW_CALIB_THERM_PMR_COMP_100K_PU_PM7: Returns channel resistance
+ *	in ohms using 100k pullup for PMR735A/PMR735B thermistor channels,
+ *	compensating for ADC internal impedance. The hardware applies offset/slope to adc code.
  */
 enum vadc_scale_fn_type {
 	SCALE_DEFAULT = 0,
@@ -181,6 +187,8 @@ enum vadc_scale_fn_type {
 	SCALE_HW_CALIB_CUR_RAW,
 	SCALE_HW_CALIB_PM2250_S3_DIE_TEMP,
 	SCALE_HW_CALIB_PM5_CUR,
+	SCALE_HW_CALIB_RESISTANCE_100K_PU_PM7,
+	SCALE_HW_CALIB_THERM_PMR_COMP_100K_PU_PM7,
 	SCALE_HW_CALIB_INVALID,
 };
 

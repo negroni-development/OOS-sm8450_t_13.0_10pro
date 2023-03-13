@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -50,6 +51,9 @@
 #define SDE_HW_VER_720	SDE_HW_VER(7, 2, 0) /* yupik */
 #define SDE_HW_VER_810	SDE_HW_VER(8, 1, 0) /* waipio */
 #define SDE_HW_VER_820	SDE_HW_VER(8, 2, 0) /* diwali */
+#define SDE_HW_VER_830	SDE_HW_VER(8, 3, 0) /* parrot */
+#define SDE_HW_VER_850	SDE_HW_VER(8, 5, 0) /* cape */
+#define SDE_HW_VER_910	SDE_HW_VER(9, 1, 0) /* neo */
 
 /* Avoid using below IS_XXX macros outside catalog, use feature bit instead */
 #define IS_SDE_MAJOR_SAME(rev1, rev2)   \
@@ -77,6 +81,9 @@
 #define IS_YUPIK_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_720)
 #define IS_WAIPIO_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_810)
 #define IS_DIWALI_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_820)
+#define IS_PARROT_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_830)
+#define IS_CAPE_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_850)
+#define IS_NEO_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_910)
 
 #define SDE_HW_BLK_NAME_LEN	16
 
@@ -155,6 +162,7 @@ enum {
 	SDE_HW_UBWC_VER_20 = SDE_HW_UBWC_VER(0x200),
 	SDE_HW_UBWC_VER_30 = SDE_HW_UBWC_VER(0x300),
 	SDE_HW_UBWC_VER_40 = SDE_HW_UBWC_VER(0x400),
+	SDE_HW_UBWC_VER_43 = SDE_HW_UBWC_VER(0x431),
 };
 #define IS_UBWC_10_SUPPORTED(rev) \
 		IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_UBWC_VER_10)
@@ -164,6 +172,8 @@ enum {
 		IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_UBWC_VER_30)
 #define IS_UBWC_40_SUPPORTED(rev) \
 		IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_UBWC_VER_40)
+#define IS_UBWC_43_SUPPORTED(rev) \
+		IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_UBWC_VER_43)
 
 /**
  * Supported SSPP system cache settings
@@ -174,6 +184,12 @@ enum {
 #define SSPP_SYS_CACHE_OP_TYPE	BIT(3)
 #define SSPP_SYS_CACHE_NO_ALLOC	BIT(4)
 
+enum sde_sys_cache_op_type {
+	SDE_SYS_CACHE_NORMAL_READ = 0,
+	SDE_SYS_CACHE_READ_INVALIDATE = 2,
+	SDE_SYS_CACHE_READ_EVICT = 3
+};
+
 /**
  * sde_sys_cache_type: Types of system cache supported
  * SDE_SYS_CACHE_DISP: Static img system cache
@@ -182,6 +198,8 @@ enum {
  */
 enum sde_sys_cache_type {
 	SDE_SYS_CACHE_DISP,
+	SDE_SYS_CACHE_DISP_LEFT,
+	SDE_SYS_CACHE_DISP_RIGHT,
 	SDE_SYS_CACHE_MAX,
 	SDE_SYS_CACHE_NONE = SDE_SYS_CACHE_MAX
 };
@@ -225,6 +243,7 @@ struct sde_intr_irq_offsets {
  * @SDE_MDP_WD_TIMER      WD timer support
  * @SDE_MDP_DHDR_MEMPOOL   Dynamic HDR Metadata mempool present
  * @SDE_MDP_DHDR_MEMPOOL_4K Dynamic HDR mempool is 4k aligned
+ * @SDE_MDP_LLCC_DISP_LR   Separate SCID for left and right display
  * @SDE_MDP_PERIPH_TOP_REMOVED Indicates if periph top0 block is removed
  * @SDE_MDP_MAX            Maximum value
 
@@ -240,6 +259,7 @@ enum {
 	SDE_MDP_DHDR_MEMPOOL,
 	SDE_MDP_DHDR_MEMPOOL_4K,
 	SDE_MDP_PERIPH_TOP_0_REMOVED,
+	SDE_MDP_LLCC_DISP_LR,
 	SDE_MDP_MAX
 };
 
@@ -353,6 +373,8 @@ enum {
  * @SDE_DISP_SECONDARY_PREF   Layer mixer preferred for secondary display
  * @SDE_MIXER_COMBINED_ALPHA  Layer mixer bg and fg alpha in single register
  * @SDE_MIXER_NOISE_LAYER     Layer mixer supports noise layer
+ * @SDE_MIXER_IS_VIRTUAL      Layer mixer which is removed but used for proper
+ *                            Dedicated CWB allocation
  * @SDE_MIXER_MAX             maximum value
  */
 enum {
@@ -366,6 +388,7 @@ enum {
 	SDE_DISP_DCWB_PREF,
 	SDE_MIXER_COMBINED_ALPHA,
 	SDE_MIXER_NOISE_LAYER,
+	SDE_MIXER_IS_VIRTUAL,
 	SDE_MIXER_MAX
 };
 
@@ -457,6 +480,7 @@ enum {
  * @SDE_DSC_HW_REV_1_1          dsc block supports dsc 1.1 only
  * @SDE_DSC_HW_REV_1_2          dsc block supports dsc 1.1 and 1.2
  * @SDE_DSC_NATIVE_422_EN,      Supports native422 and native420 encoding
+ * @SDE_DSC_REDUCED_OB_MAX,	DSC size is limited to 10k
  * @SDE_DSC_ENC,                DSC encoder sub block
  * @SDE_DSC_CTL,                DSC ctl sub block
  * @SDE_DSC_MAX
@@ -466,6 +490,7 @@ enum {
 	SDE_DSC_HW_REV_1_1,
 	SDE_DSC_HW_REV_1_2,
 	SDE_DSC_NATIVE_422_EN,
+	SDE_DSC_REDUCED_OB_MAX,
 	SDE_DSC_ENC,
 	SDE_DSC_CTL,
 	SDE_DSC_MAX
@@ -493,6 +518,7 @@ enum {
  *                              blocks
  * @SDE_CTL_UIDLE               CTL supports uidle
  * @SDE_CTL_UNIFIED_DSPP_FLUSH  CTL supports only one flush bit for DSPP
+ * @SDE_CTL_DMA4_DMA5		CTL supports DMA4 & DMA5 pipes
  * @SDE_CTL_MAX
  */
 enum {
@@ -502,6 +528,7 @@ enum {
 	SDE_CTL_ACTIVE_CFG,
 	SDE_CTL_UIDLE,
 	SDE_CTL_UNIFIED_DSPP_FLUSH,
+	SDE_CTL_DMA4_DMA5,
 	SDE_CTL_MAX
 };
 
@@ -945,13 +972,53 @@ enum sde_clk_ctrl_type {
 	SDE_CLK_CTRL_RGB3,
 	SDE_CLK_CTRL_DMA0,
 	SDE_CLK_CTRL_DMA1,
+	SDE_CLK_CTRL_DMA2,
+	SDE_CLK_CTRL_DMA3,
+	SDE_CLK_CTRL_DMA4,
+	SDE_CLK_CTRL_DMA5,
 	SDE_CLK_CTRL_CURSOR0,
 	SDE_CLK_CTRL_CURSOR1,
 	SDE_CLK_CTRL_WB0,
 	SDE_CLK_CTRL_WB1,
 	SDE_CLK_CTRL_WB2,
 	SDE_CLK_CTRL_LUTDMA,
+	SDE_CLK_CTRL_IPCC_MSI,
 	SDE_CLK_CTRL_MAX,
+};
+
+#define SDE_CLK_CTRL_VALID(x) (x > SDE_CLK_CTRL_NONE && x < SDE_CLK_CTRL_MAX)
+#define SDE_CLK_CTRL_SSPP_VALID(x) (x >= SDE_CLK_CTRL_VIG0 && x <= SDE_CLK_CTRL_CURSOR1)
+#define SDE_CLK_CTRL_WB_VALID(x) (x >= SDE_CLK_CTRL_WB0 && x <= SDE_CLK_CTRL_WB2)
+#define SDE_CLK_CTRL_LUTDMA_VALID(x) (x == SDE_CLK_CTRL_LUTDMA)
+#define SDE_CLK_CTRL_IPCC_MSI_VALID(x) (x == SDE_CLK_CTRL_IPCC_MSI)
+
+/**
+ * sde_clk_ctrl_type - String of top level clock control signals
+ */
+static const char *sde_clk_ctrl_type_s[SDE_CLK_CTRL_MAX] = {
+	[SDE_CLK_CTRL_NONE] = "NONE",
+	[SDE_CLK_CTRL_VIG0] = "VIG0",
+	[SDE_CLK_CTRL_VIG1] = "VIG1",
+	[SDE_CLK_CTRL_VIG2] = "VIG2",
+	[SDE_CLK_CTRL_VIG3] = "VIG3",
+	[SDE_CLK_CTRL_VIG4] = "VIG4",
+	[SDE_CLK_CTRL_RGB0] = "RGB0",
+	[SDE_CLK_CTRL_RGB1] = "RGB1",
+	[SDE_CLK_CTRL_RGB2] = "RGB2",
+	[SDE_CLK_CTRL_RGB3] = "RGB3",
+	[SDE_CLK_CTRL_DMA0] = "DMA0",
+	[SDE_CLK_CTRL_DMA1] = "DMA1",
+	[SDE_CLK_CTRL_DMA2] = "DMA2",
+	[SDE_CLK_CTRL_DMA3] = "DMA3",
+	[SDE_CLK_CTRL_DMA4] = "DMA4",
+	[SDE_CLK_CTRL_DMA5] = "DMA5",
+	[SDE_CLK_CTRL_CURSOR0] = "CURSOR0",
+	[SDE_CLK_CTRL_CURSOR1] = "CURSOR1",
+	[SDE_CLK_CTRL_WB0] = "WB0",
+	[SDE_CLK_CTRL_WB1] = "WB1",
+	[SDE_CLK_CTRL_WB2] = "WB2",
+	[SDE_CLK_CTRL_LUTDMA] = "LUTDMA",
+	[SDE_CLK_CTRL_IPCC_MSI] = "IPCC_MSI",
 };
 
 /* struct sde_clk_ctrl_reg : Clock control register
@@ -1143,11 +1210,13 @@ struct sde_ds_cfg {
  * @features           bit mask identifying sub-blocks/features
  * @sblk               sub-blocks information
  * @merge_3d_id        merge_3d block id
+ * @dcwb:              ID of DCWB, DCWB_MAX if invalid
  */
 struct sde_pingpong_cfg  {
 	SDE_HW_BLK_INFO;
 	const struct sde_pingpong_sub_blks *sblk;
 	int merge_3d_id;
+	u32 dcwb_id;
 };
 
 /**
@@ -1520,6 +1589,7 @@ struct sde_perf_cfg {
  * @skip_inline_rot_thresh    Skip inline rotation threshold
  * @has_idle_pc        indicate if idle power collapse feature is supported
  * @allowed_dsc_reservation_switch  intf to which dsc reservation switch is supported
+ * @has_reduced_ob_max	indicate if DSC size is limited to 10k
  * @wakeup_with_touch  indicate early wake up display with input touch event
  * @has_hdr            HDR feature support
  * @has_hdr_plus       HDR10+ feature support
@@ -1562,11 +1632,14 @@ struct sde_perf_cfg {
  *                         during secure-ui session
  * @sui_supported_blendstage  secure-ui supported blendstage
  * @has_sui_blendstage  flag to indicate secure-ui has a blendstage restriction
+ * @ddr_count           number of ddr types supported
+ * @ddr_list_index      Index of supported ddr type
  * @has_cursor    indicates if hardware cursor is supported
  * @has_vig_p010  indicates if vig pipe supports p010 format
  * @has_fp16      indicates if FP16 format is supported on SSPP pipes
  * @has_precise_vsync_ts  indicates if HW has vsyc timestamp logging capability
  * @has_ubwc_stats: indicates if ubwc stats feature is supported
+ * @has_vbif_clk_split: VBIF clock split supported
  * @mdss_hw_block_size  Max offset of MDSS_HW block (0 offset), used for debug
  * @inline_rot_formats formats supported by the inline rotator feature
  * @irq_offset_list     list of sde_intr_irq_offsets to initialize irq table
@@ -1613,6 +1686,7 @@ struct sde_mdss_cfg {
 	bool skip_inline_rot_threshold;
 	bool has_idle_pc;
 	u32 allowed_dsc_reservation_switch;
+	bool has_reduced_ob_max;
 	bool wakeup_with_touch;
 	u32 vbif_qos_nlvl;
 	u32 ts_prefill_rev;
@@ -1649,6 +1723,9 @@ struct sde_mdss_cfg {
 	u32 sui_supported_blendstage;
 	bool has_sui_blendstage;
 
+	u32 ddr_count;
+	u32 ddr_list_index;
+
 	bool has_hdr;
 	bool has_hdr_plus;
 	bool has_cursor;
@@ -1656,6 +1733,8 @@ struct sde_mdss_cfg {
 	bool has_fp16;
 	bool has_precise_vsync_ts;
 	bool has_ubwc_stats;
+
+	bool has_vbif_clk_split;
 
 	u32 mdss_hw_block_size;
 	u32 mdss_count;
@@ -1675,6 +1754,7 @@ struct sde_mdss_cfg {
 
 	u32 mixer_count;
 	struct sde_lm_cfg mixer[MAX_BLOCKS];
+	u32 virtual_mixers_mask;
 
 	struct sde_dspp_top_cfg dspp_top;
 
@@ -1763,13 +1843,15 @@ struct sde_mdss_hw_cfg_handler {
 #define BLK_RC(s) ((s)->rc)
 
 /**
- * sde_hw_set_preference: populate the individual hw lm preferences,
- *                        overwrite if exists
- * @sde_cfg:              pointer to sspp cfg
- * @num_lm:               num lms to set preference
- * @disp_type:            is the given display primary/secondary
+ * sde_hw_mixer_set_preference: populate the individual hw lm preferences,
+ *                              overwrite if exists
+ * @sde_cfg:                    pointer to sspp cfg
+ * @num_lm:                     num lms to set preference
+ * @disp_type:                  is the given display primary/secondary
+ *
+ * Return:                      layer mixer mask allocated for the disp_type
  */
-void sde_hw_mixer_set_preference(struct sde_mdss_cfg *sde_cfg, u32 num_lm,
+u32 sde_hw_mixer_set_preference(struct sde_mdss_cfg *sde_cfg, u32 num_lm,
 		uint32_t disp_type);
 
 /**

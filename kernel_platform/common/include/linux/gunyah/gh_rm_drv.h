@@ -286,6 +286,13 @@ typedef int (*gh_vcpu_affinity_reset_cb_t)(gh_vmid_t vmid, gh_label_t label);
 typedef int (*gh_vpm_grp_set_cb_t)(gh_vmid_t vmid, gh_capid_t cap_id, int linux_irq);
 typedef int (*gh_vpm_grp_reset_cb_t)(gh_vmid_t vmid, int *linux_irq);
 
+/* Client APIs for VM Services */
+struct gh_vm_status {
+	u8 vm_status;
+	u8 os_status;
+	u16 app_status;
+} __packed;
+
 #if IS_ENABLED(CONFIG_GH_RM_DRV)
 /* RM client registration APIs */
 int gh_rm_register_notifier(struct notifier_block *nb);
@@ -310,10 +317,14 @@ int gh_rm_vm_irq_reclaim(gh_virq_handle_t virq_handle);
 
 int gh_rm_set_virtio_mmio_cb(gh_virtio_mmio_cb_t fnptr);
 void gh_rm_unset_virtio_mmio_cb(void);
-int gh_rm_set_vcpu_affinity_cb(gh_vcpu_affinity_set_cb_t fnptr);
-int gh_rm_reset_vcpu_affinity_cb(gh_vcpu_affinity_reset_cb_t fnptr);
-int gh_rm_set_vpm_grp_cb(gh_vpm_grp_set_cb_t fnptr);
-int gh_rm_reset_vpm_grp_cb(gh_vpm_grp_reset_cb_t fnptr);
+int gh_rm_set_vcpu_affinity_cb(enum gh_vm_names vm_name_index,
+			       gh_vcpu_affinity_set_cb_t fnptr);
+int gh_rm_reset_vcpu_affinity_cb(enum gh_vm_names vm_name_index,
+				 gh_vcpu_affinity_reset_cb_t fnptr);
+int gh_rm_set_vpm_grp_cb(enum gh_vm_names vm_name_index,
+			 gh_vpm_grp_set_cb_t fnptr);
+int gh_rm_reset_vpm_grp_cb(enum gh_vm_names vm_name_index,
+			   gh_vpm_grp_reset_cb_t fnptr);
 
 /* Client APIs for VM management */
 int gh_rm_vm_alloc_vmid(enum gh_vm_names vm_name, int *vmid);
@@ -331,13 +342,6 @@ int gh_rm_vm_reset(gh_vmid_t vmid);
 /* Client APIs for VM query */
 int gh_rm_populate_hyp_res(gh_vmid_t vmid, const char *vm_name);
 int gh_rm_unpopulate_hyp_res(gh_vmid_t vmid, const char *vm_name);
-
-/* Client APIs for VM Services */
-struct gh_vm_status {
-	u8 vm_status;
-	u8 os_status;
-	u16 app_status;
-} __packed;
 
 struct gh_vm_status *gh_rm_vm_get_status(gh_vmid_t vmid);
 int gh_rm_vm_set_status(struct gh_vm_status gh_vm_status);

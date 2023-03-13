@@ -152,6 +152,9 @@ struct lpass_cdc_va_macro_priv {
 	struct clk *lpass_audio_hw_vote;
 	struct mutex mclk_lock;
 	struct mutex swr_clk_lock;
+#ifdef OPLUS_ARCH_EXTENDS
+	struct mutex wlock;
+#endif /* OPLUS_ARCH_EXTENDS */
 	struct snd_soc_component *component;
 	struct hpf_work va_hpf_work[LPASS_CDC_VA_MACRO_NUM_DECIMATORS];
 	struct va_mute_work va_mute_dwork[LPASS_CDC_VA_MACRO_NUM_DECIMATORS];
@@ -190,8 +193,37 @@ struct lpass_cdc_va_macro_priv {
 	int dapm_tx_clk_status;
 	u16 current_clk_id;
 	bool dev_up;
+	bool pre_dev_up;
 	bool swr_dmic_enable;
+#ifdef OPLUS_ARCH_EXTENDS
+	int wlock_holders;
+#endif /* OPLUS_ARCH_EXTENDS */
 };
+
+#ifdef OPLUS_ARCH_EXTENDS
+static int lpass_cdc_va_macro_wake_enable(struct lpass_cdc_va_macro_priv *va_priv,
+				bool wake_enable)
+{
+	int ret = 0;
+
+	mutex_lock(&va_priv->wlock);
+	if (wake_enable) {
+		if (va_priv->wlock_holders++ == 0) {
+			dev_dbg(va_priv->dev, "%s: pm wake\n", __func__);
+			pm_stay_awake(va_priv->dev);
+		}
+	} else {
+		if (--va_priv->wlock_holders == 0) {
+			dev_dbg(va_priv->dev, "%s: pm release\n", __func__);
+			pm_relax(va_priv->dev);
+		}
+		if (va_priv->wlock_holders < 0)
+			va_priv->wlock_holders = 0;
+	}
+	mutex_unlock(&va_priv->wlock);
+	return ret;
+}
+#endif /* OPLUS_ARCH_EXTENDS */
 
 static bool lpass_cdc_va_macro_get_data(struct snd_soc_component *component,
 			      struct device **va_dev,
@@ -294,7 +326,8 @@ static int lpass_cdc_va_macro_mclk_enable(
 					va_priv->default_clk_id,
 					va_priv->clk_id,
 					false);
-		lpass_cdc_va_macro_core_vote(va_priv, false);
+		if (!ret)
+			lpass_cdc_va_macro_core_vote(va_priv, false);
 	}
 exit:
 	mutex_unlock(&va_priv->mclk_lock);
@@ -335,6 +368,7 @@ static int lpass_cdc_va_macro_event_handler(struct snd_soc_component *component,
 				__func__);
 		break;
 	case LPASS_CDC_MACRO_EVT_PRE_SSR_UP:
+		va_priv->pre_dev_up = true;
 		/* enable&disable VA_CORE_CLK to reset GFMUX reg */
 		ret = lpass_cdc_va_macro_core_vote(va_priv, true);
 		if (ret < 0) {
@@ -370,6 +404,7 @@ static int lpass_cdc_va_macro_event_handler(struct snd_soc_component *component,
 		lpass_cdc_rsc_clk_reset(va_dev, VA_CORE_CLK);
 		break;
 	case LPASS_CDC_MACRO_EVT_SSR_DOWN:
+		va_priv->pre_dev_up = false;
 		va_priv->dev_up = false;
 		if (va_priv->swr_ctrl_data) {
 			swrm_wcd_notify(
@@ -427,6 +462,7 @@ static int lpass_cdc_va_macro_swr_pwr_event(struct snd_soc_dapm_widget *w,
 	int ret = 0;
 	struct device *va_dev = NULL;
 	struct lpass_cdc_va_macro_priv *va_priv = NULL;
+	bool vote_err = false;
 
 	if (!lpass_cdc_va_macro_get_data(component, &va_dev,
 					 &va_priv, __func__))
@@ -503,12 +539,14 @@ static int lpass_cdc_va_macro_swr_pwr_event(struct snd_soc_dapm_widget *w,
 					__func__);
 				if (va_priv->dev_up)
 					break;
+				vote_err = true;
 			}
 			ret = lpass_cdc_clk_rsc_request_clock(va_priv->dev,
 					va_priv->default_clk_id,
 					VA_CORE_CLK,
 					false);
-			lpass_cdc_va_macro_core_vote(va_priv, false);
+			if (!vote_err)
+				lpass_cdc_va_macro_core_vote(va_priv, false);
 			if (ret) {
 				dev_err(component->dev,
 					"%s: request clock VA_CLK disable failed\n",
@@ -740,6 +778,11 @@ static int lpass_cdc_va_macro_core_vote(void *handle, bool enable)
 		pr_err("%s: va priv data is NULL\n", __func__);
 		return -EINVAL;
 	}
+	if (!va_priv->pre_dev_up && enable) {
+		pr_err("%s: adsp is not up\n", __func__);
+		return -EINVAL;
+	}
+
 	trace_printk("%s, enter: enable %d\n", __func__, enable);
 	if (enable) {
 		pm_runtime_get_sync(va_priv->dev);
@@ -939,6 +982,9 @@ static void lpass_cdc_va_macro_tx_hpf_corner_freq_callback(
 		snd_soc_component_update_bits(component, hpf_gate_reg,
 					      0x02, 0x00);
 	}
+#ifdef OPLUS_ARCH_EXTENDS
+	lpass_cdc_va_macro_wake_enable(va_priv, 0);
+#endif /* OPLUS_ARCH_EXTENDS */
 }
 
 static void lpass_cdc_va_macro_mute_update_callback(struct work_struct *work)
@@ -961,6 +1007,9 @@ static void lpass_cdc_va_macro_mute_update_callback(struct work_struct *work)
 	snd_soc_component_update_bits(component, tx_vol_ctl_reg, 0x10, 0x00);
 	dev_dbg(va_priv->dev, "%s: decimator %u unmute\n",
 		__func__, decimator);
+#ifdef OPLUS_ARCH_EXTENDS
+	lpass_cdc_va_macro_wake_enable(va_priv, 0);
+#endif /* OPLUS_ARCH_EXTENDS */
 }
 
 static int lpass_cdc_va_macro_put_dec_enum(struct snd_kcontrol *kcontrol,
@@ -1175,37 +1224,14 @@ static int lpass_cdc_va_macro_tx_mixer_put(struct snd_kcontrol *kcontrol,
 }
 
 static int lpass_cdc_va_macro_enable_dmic(struct snd_soc_dapm_widget *w,
-#ifndef OPLUS_ARCH_EXTENDS
-/*Minyi.Hu@MULTIMEDIA.AUDIODRIVER.CODEC.CR3093277, 2021/12/15, fix dmic pop issue, case 05550769*/
-		struct snd_kcontrol *kcontrol, int event)
-#else
 		struct snd_kcontrol *kcontrol, int event, u16 adc_mux0_cfg)
-#endif
 {
 	struct snd_soc_component *component =
 				snd_soc_dapm_to_component(w->dapm);
 	unsigned int dmic = 0;
 
-#ifndef OPLUS_ARCH_EXTENDS
-/*Minyi.Hu@MULTIMEDIA.AUDIODRIVER.CODEC.CR3093277, 2021/12/15, fix dmic pop issue, case 05550769*/
-	int ret = 0;
-	char *wname;
-
-	wname = strpbrk(w->name, "01234567");
-	if (!wname) {
-		dev_err(component->dev, "%s: widget not found\n", __func__);
-		return -EINVAL;
-	}
-
-	ret = kstrtouint(wname, 10, &dmic);
-	if (ret < 0) {
-		dev_err(component->dev, "%s: Invalid DMIC line on the codec\n",
-			__func__);
-		return -EINVAL;
-	}
-#else
 	dmic = (snd_soc_component_read(component, adc_mux0_cfg) >> 4) - 1;
-#endif
+
 	dev_dbg(component->dev, "%s: event %d DMIC%d\n",
 		__func__, event,  dmic);
 
@@ -1231,10 +1257,7 @@ static int lpass_cdc_va_macro_enable_dec(struct snd_soc_dapm_widget *w,
 	u16 tx_gain_ctl_reg;
 	u8 hpf_cut_off_freq;
 	u16 adc_mux_reg = 0;
-#ifdef OPLUS_ARCH_EXTENDS
-/*Minyi.Hu@MULTIMEDIA.AUDIODRIVER.CODEC.CR3093277, 2021/12/15, fix dmic pop issue, case 05550769*/
 	u16 adc_mux0_reg = 0;
-#endif
 	u16 tx_fs_reg = 0;
 	struct device *va_dev = NULL;
 	struct lpass_cdc_va_macro_priv *va_priv = NULL;
@@ -1260,22 +1283,15 @@ static int lpass_cdc_va_macro_enable_dec(struct snd_soc_dapm_widget *w,
 				LPASS_CDC_VA_MACRO_TX_PATH_OFFSET * decimator;
 	adc_mux_reg = LPASS_CDC_VA_INP_MUX_ADC_MUX0_CFG1 +
 			LPASS_CDC_VA_MACRO_ADC_MUX_CFG_OFFSET * decimator;
-
-#ifdef OPLUS_ARCH_EXTENDS
-/*Minyi.Hu@MULTIMEDIA.AUDIODRIVER.CODEC.CR3093277, 2021/12/15, fix dmic pop issue, case 05550769*/
 	adc_mux0_reg = LPASS_CDC_VA_INP_MUX_ADC_MUX0_CFG0 +
 			LPASS_CDC_VA_MACRO_ADC_MUX_CFG_OFFSET * decimator;
-#endif
 	tx_fs_reg = LPASS_CDC_VA_TX0_TX_PATH_CTL +
 				LPASS_CDC_VA_MACRO_TX_PATH_OFFSET * decimator;
 	va_priv->pcm_rate[decimator] = (snd_soc_component_read(component,
 				tx_fs_reg) & 0x0F);
 
-#ifdef OPLUS_ARCH_EXTENDS
-/*Minyi.Hu@MULTIMEDIA.AUDIODRIVER.CODEC.CR3093277, 2021/12/15, fix dmic pop issue, case 05550769*/
 	if(!is_amic_enabled(component, decimator))
 		lpass_cdc_va_macro_enable_dmic(w, kcontrol, event, adc_mux0_reg);
-#endif
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
@@ -1342,6 +1358,9 @@ static int lpass_cdc_va_macro_enable_dec(struct snd_soc_dapm_widget *w,
 		 * 6ms delay is required as per HW spec
 		 */
 		usleep_range(6000, 6010);
+#ifdef OPLUS_ARCH_EXTENDS
+		lpass_cdc_va_macro_wake_enable(va_priv, 1);
+#endif /* OPLUS_ARCH_EXTENDS */
 		/* schedule work queue to Remove Mute */
 		queue_delayed_work(system_freezable_wq,
 				   &va_priv->va_mute_dwork[decimator].dwork,
@@ -1350,11 +1369,21 @@ static int lpass_cdc_va_macro_enable_dec(struct snd_soc_dapm_widget *w,
 				   #else /* OPLUS_ARCH_EXTENDS */
 				   msecs_to_jiffies(unmute_delay));
 				   #endif /* OPLUS_ARCH_EXTENDS */
+#ifdef OPLUS_ARCH_EXTENDS
+		if (va_priv->va_hpf_work[decimator].hpf_cut_off_freq !=
+							CF_MIN_3DB_150HZ) {
+			lpass_cdc_va_macro_wake_enable(va_priv, 1);
+			queue_delayed_work(system_freezable_wq,
+					&va_priv->va_hpf_work[decimator].dwork,
+					msecs_to_jiffies(hpf_delay));
+		}
+#else
 		if (va_priv->va_hpf_work[decimator].hpf_cut_off_freq !=
 							CF_MIN_3DB_150HZ)
 			queue_delayed_work(system_freezable_wq,
 					&va_priv->va_hpf_work[decimator].dwork,
 					msecs_to_jiffies(hpf_delay));
+#endif /* OPLUS_ARCH_EXTENDS */
 		/* apply gain after decimator is enabled */
 		snd_soc_component_write(component, tx_gain_ctl_reg,
 			snd_soc_component_read(component, tx_gain_ctl_reg));
@@ -1389,13 +1418,23 @@ static int lpass_cdc_va_macro_enable_dec(struct snd_soc_dapm_widget *w,
 						0x03, 0x01);
 			}
 		}
+#ifdef OPLUS_ARCH_EXTENDS
+		lpass_cdc_va_macro_wake_enable(va_priv, 0);
+#endif /* OPLUS_ARCH_EXTENDS */
 		cancel_delayed_work_sync(
 				&va_priv->va_mute_dwork[decimator].dwork);
+#ifdef OPLUS_ARCH_EXTENDS
+		lpass_cdc_va_macro_wake_enable(va_priv, 0);
+#endif /* OPLUS_ARCH_EXTENDS */
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		/* Disable TX CLK */
 		snd_soc_component_update_bits(component, tx_vol_ctl_reg,
 					0x20, 0x00);
+		snd_soc_component_update_bits(component, tx_vol_ctl_reg,
+					0x40, 0x40);
+		snd_soc_component_update_bits(component, tx_vol_ctl_reg,
+					0x40, 0x00);
 		snd_soc_component_update_bits(component, tx_vol_ctl_reg,
 					0x10, 0x00);
 		break;
@@ -1890,49 +1929,23 @@ static const struct snd_soc_dapm_widget lpass_cdc_va_macro_dapm_widgets[] = {
 	SND_SOC_DAPM_SUPPLY("VA MIC BIAS", SND_SOC_NOPM, 0, 0,
 		lpass_cdc_va_macro_enable_micbias,
 		SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
-#ifndef OPLUS_ARCH_EXTENDS
-/*Minyi.Hu@MULTIMEDIA.AUDIODRIVER.CODEC.CR3093277, 2021/12/15, fix dmic pop issue, case 05550769*/
-	SND_SOC_DAPM_ADC_E("VA DMIC0", NULL, SND_SOC_NOPM, 0, 0,
-		lpass_cdc_va_macro_enable_dmic, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMD),
 
-	SND_SOC_DAPM_ADC_E("VA DMIC1", NULL, SND_SOC_NOPM, 0, 0,
-		lpass_cdc_va_macro_enable_dmic, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMD),
-
-	SND_SOC_DAPM_ADC_E("VA DMIC2", NULL, SND_SOC_NOPM, 0, 0,
-		lpass_cdc_va_macro_enable_dmic, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMD),
-
-	SND_SOC_DAPM_ADC_E("VA DMIC3", NULL, SND_SOC_NOPM, 0, 0,
-		lpass_cdc_va_macro_enable_dmic, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMD),
-
-	SND_SOC_DAPM_ADC_E("VA DMIC4", NULL, SND_SOC_NOPM, 0, 0,
-		lpass_cdc_va_macro_enable_dmic, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMD),
-
-	SND_SOC_DAPM_ADC_E("VA DMIC5", NULL, SND_SOC_NOPM, 0, 0,
-		lpass_cdc_va_macro_enable_dmic, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMD),
-
-	SND_SOC_DAPM_ADC_E("VA DMIC6", NULL, SND_SOC_NOPM, 0, 0,
-		lpass_cdc_va_macro_enable_dmic, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMD),
-
-	SND_SOC_DAPM_ADC_E("VA DMIC7", NULL, SND_SOC_NOPM, 0, 0,
-		lpass_cdc_va_macro_enable_dmic, SND_SOC_DAPM_PRE_PMU |
-		SND_SOC_DAPM_POST_PMD),
-#else
 	SND_SOC_DAPM_ADC("VA DMIC0", NULL, SND_SOC_NOPM, 0, 0),
+
 	SND_SOC_DAPM_ADC("VA DMIC1", NULL, SND_SOC_NOPM, 0, 0),
+
 	SND_SOC_DAPM_ADC("VA DMIC2", NULL, SND_SOC_NOPM, 0, 0),
+
 	SND_SOC_DAPM_ADC("VA DMIC3", NULL, SND_SOC_NOPM, 0, 0),
+
 	SND_SOC_DAPM_ADC("VA DMIC4", NULL, SND_SOC_NOPM, 0, 0),
+
 	SND_SOC_DAPM_ADC("VA DMIC5", NULL, SND_SOC_NOPM, 0, 0),
+
 	SND_SOC_DAPM_ADC("VA DMIC6", NULL, SND_SOC_NOPM, 0, 0),
+
 	SND_SOC_DAPM_ADC("VA DMIC7", NULL, SND_SOC_NOPM, 0, 0),
-#endif
+
 	SND_SOC_DAPM_MUX_E("VA DEC0 MUX", SND_SOC_NOPM, LPASS_CDC_VA_MACRO_DEC0, 0,
 			   &va_dec0_mux, lpass_cdc_va_macro_enable_dec,
 			   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
@@ -2585,6 +2598,9 @@ static int lpass_cdc_va_macro_probe(struct platform_device *pdev)
 	va_priv->clk_id = VA_CORE_CLK;
 	va_priv->default_clk_id = default_clk_id;
 	va_priv->current_clk_id = TX_CORE_CLK;
+#ifdef OPLUS_ARCH_EXTENDS
+	va_priv->wlock_holders = 0;
+#endif /* OPLUS_ARCH_EXTENDS */
 
 	if (is_used_va_swr_gpio) {
 		va_priv->reset_swr = true;
@@ -2600,8 +2616,12 @@ static int lpass_cdc_va_macro_probe(struct platform_device *pdev)
 		mutex_init(&va_priv->swr_clk_lock);
 	}
 	va_priv->is_used_va_swr_gpio = is_used_va_swr_gpio;
+	va_priv->pre_dev_up = true;
 
 	mutex_init(&va_priv->mclk_lock);
+#ifdef OPLUS_ARCH_EXTENDS
+	mutex_init(&va_priv->wlock);
+#endif /* OPLUS_ARCH_EXTENDS */
 	dev_set_drvdata(&pdev->dev, va_priv);
 	lpass_cdc_va_macro_init_ops(&ops, va_io_base);
 	ops.clk_id_req = va_priv->default_clk_id;
@@ -2622,6 +2642,9 @@ static int lpass_cdc_va_macro_probe(struct platform_device *pdev)
 
 reg_macro_fail:
 	mutex_destroy(&va_priv->mclk_lock);
+#ifdef OPLUS_ARCH_EXTENDS
+	mutex_destroy(&va_priv->wlock);
+#endif /* OPLUS_ARCH_EXTENDS */
 	if (is_used_va_swr_gpio)
 		mutex_destroy(&va_priv->swr_clk_lock);
 	return ret;
@@ -2649,6 +2672,9 @@ static int lpass_cdc_va_macro_remove(struct platform_device *pdev)
 	pm_runtime_set_suspended(&pdev->dev);
 	lpass_cdc_unregister_macro(&pdev->dev, VA_MACRO);
 	mutex_destroy(&va_priv->mclk_lock);
+#ifdef OPLUS_ARCH_EXTENDS
+	mutex_destroy(&va_priv->wlock);
+#endif /* OPLUS_ARCH_EXTENDS */
 	if (va_priv->is_used_va_swr_gpio)
 		mutex_destroy(&va_priv->swr_clk_lock);
 	return 0;

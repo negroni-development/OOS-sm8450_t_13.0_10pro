@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -1254,6 +1255,140 @@ static uint8_t hdd_son_get_rx_nss(struct wlan_objmgr_vdev *vdev)
 	return rx_nss;
 }
 
+static void hdd_son_deauth_sta(struct wlan_objmgr_vdev *vdev,
+			       uint8_t *peer_mac,
+			       bool ignore_frame)
+{
+	struct hdd_adapter *adapter = wlan_hdd_get_adapter_from_objmgr(vdev);
+	struct csr_del_sta_params param;
+
+	if (!adapter) {
+		hdd_err("null adapter");
+		return;
+	}
+
+	qdf_mem_copy(param.peerMacAddr.bytes, peer_mac, QDF_MAC_ADDR_SIZE);
+	param.subtype = SIR_MAC_MGMT_DEAUTH;
+	param.reason_code = ignore_frame ? REASON_HOST_TRIGGERED_SILENT_DEAUTH
+					 : REASON_UNSPEC_FAILURE;
+	hdd_debug("Peer - "QDF_MAC_ADDR_FMT" Ignore Frame - %u",
+		  QDF_FULL_MAC_REF(peer_mac), ignore_frame);
+
+	if (hdd_softap_sta_deauth(adapter, &param) != QDF_STATUS_SUCCESS)
+		hdd_err("Error in deauthenticating peer");
+}
+
+static void hdd_son_modify_acl(struct wlan_objmgr_vdev *vdev,
+			       uint8_t *peer_mac,
+			       bool allow_auth)
+{
+	QDF_STATUS status;
+	struct hdd_adapter *adapter = wlan_hdd_get_adapter_from_objmgr(vdev);
+
+	if (!adapter) {
+		hdd_err("null adapter");
+		return;
+	}
+	hdd_debug("Peer - " QDF_MAC_ADDR_FMT " Allow Auth - %u",
+		  QDF_MAC_ADDR_REF(peer_mac), allow_auth);
+	if (allow_auth) {
+		status = wlansap_modify_acl(WLAN_HDD_GET_SAP_CTX_PTR(adapter),
+					    peer_mac,
+					    eSAP_BLACK_LIST,
+					    DELETE_STA_FROM_ACL);
+		status = wlansap_modify_acl(WLAN_HDD_GET_SAP_CTX_PTR(adapter),
+					    peer_mac,
+					    eSAP_WHITE_LIST,
+					    ADD_STA_TO_ACL);
+	} else {
+		status = wlansap_modify_acl(WLAN_HDD_GET_SAP_CTX_PTR(adapter),
+					    peer_mac,
+					    eSAP_WHITE_LIST,
+					    DELETE_STA_FROM_ACL);
+		status = wlansap_modify_acl(WLAN_HDD_GET_SAP_CTX_PTR(adapter),
+					    peer_mac,
+					    eSAP_BLACK_LIST,
+					    ADD_STA_TO_ACL);
+	}
+}
+
+static int hdd_son_send_cfg_event(struct wlan_objmgr_vdev *vdev,
+				  uint32_t event_id,
+				  uint32_t event_len,
+				  const uint8_t *event_buf)
+{
+	struct hdd_adapter *adapter;
+	uint32_t len;
+	uint32_t idx;
+	struct sk_buff *skb;
+
+	if (!event_buf) {
+		hdd_err("invalid event buf");
+		return -EINVAL;
+	}
+
+	adapter = wlan_hdd_get_adapter_from_objmgr(vdev);
+	if (!adapter) {
+		hdd_err("null adapter");
+		return -EINVAL;
+	}
+
+	len = nla_total_size(sizeof(event_id)) +
+			nla_total_size(event_len) +
+			NLMSG_HDRLEN;
+	idx = QCA_NL80211_VENDOR_SUBCMD_GET_WIFI_CONFIGURATION_INDEX;
+	skb = cfg80211_vendor_event_alloc(adapter->hdd_ctx->wiphy,
+					  &adapter->wdev,
+					  len,
+					  idx,
+					  GFP_KERNEL);
+	if (!skb) {
+		hdd_err("failed to alloc cfg80211 vendor event");
+		return -EINVAL;
+	}
+
+	if (nla_put_u32(skb,
+			QCA_WLAN_VENDOR_ATTR_CONFIG_GENERIC_COMMAND,
+			event_id)) {
+		hdd_err("failed to put attr config generic command");
+		kfree_skb(skb);
+		return -EINVAL;
+	}
+
+	if (nla_put(skb,
+		    QCA_WLAN_VENDOR_ATTR_CONFIG_GENERIC_DATA,
+		    event_len,
+		    event_buf)) {
+		hdd_err("failed to put attr config generic data");
+		kfree_skb(skb);
+		return -EINVAL;
+	}
+
+	cfg80211_vendor_event(skb, GFP_KERNEL);
+
+	return 0;
+}
+
+static int hdd_son_deliver_opmode(struct wlan_objmgr_vdev *vdev,
+				  uint32_t event_len,
+				  const uint8_t *event_buf)
+{
+	return hdd_son_send_cfg_event(vdev,
+				      QCA_NL80211_VENDOR_SUBCMD_OPMODE_UPDATE,
+				      event_len,
+				      event_buf);
+}
+
+static int hdd_son_deliver_smps(struct wlan_objmgr_vdev *vdev,
+				uint32_t event_len,
+				const uint8_t *event_buf)
+{
+	return hdd_son_send_cfg_event(vdev,
+				      QCA_NL80211_VENDOR_SUBCMD_SMPS_UPDATE,
+				      event_len,
+				      event_buf);
+}
+
 void hdd_son_register_callbacks(struct hdd_context *hdd_ctx)
 {
 	struct son_callbacks cb_obj = {0};
@@ -1277,6 +1412,13 @@ void hdd_son_register_callbacks(struct hdd_context *hdd_ctx)
 	cb_obj.os_if_get_rx_nss = hdd_son_get_rx_nss;
 	cb_obj.os_if_set_chwidth = hdd_son_set_chwidth;
 	cb_obj.os_if_get_chwidth = hdd_son_get_chwidth;
+	cb_obj.os_if_deauth_sta = hdd_son_deauth_sta;
+	cb_obj.os_if_modify_acl = hdd_son_modify_acl;
 
 	os_if_son_register_hdd_callbacks(hdd_ctx->psoc, &cb_obj);
+
+	ucfg_son_register_deliver_opmode_cb(hdd_ctx->psoc,
+					    hdd_son_deliver_opmode);
+	ucfg_son_register_deliver_smps_cb(hdd_ctx->psoc,
+					  hdd_son_deliver_smps);
 }

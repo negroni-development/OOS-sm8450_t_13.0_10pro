@@ -71,10 +71,6 @@
 #define ARCH_SHF_SMALL 0
 #endif
 
-#ifndef DISABLE_SIG_CHK
-#define DISABLE_SIG_CHK 1
-#endif
-
 /*
  * Modules' sections will be aligned on page boundaries
  * to ensure complete separation of code and data, but
@@ -1358,11 +1354,7 @@ static int check_version(const struct load_info *info,
 bad_version:
 	pr_warn("%s: disagrees about version of symbol %s\n",
 	       info->name, symname);
-#if DISABLE_SIG_CHK
-	return 1;
-#else
 	return 0;
-#endif
 }
 
 static inline int check_modstruct_version(const struct load_info *info,
@@ -1387,15 +1379,11 @@ static inline int check_modstruct_version(const struct load_info *info,
 static inline int same_magic(const char *amagic, const char *bmagic,
 			     bool has_crcs)
 {
-#if DISABLE_SIG_CHK
-	return 1;
-#else
 	if (has_crcs) {
 		amagic += strcspn(amagic, " ");
 		bmagic += strcspn(bmagic, " ");
 	}
 	return strcmp(amagic, bmagic) == 0;
-#endif
 }
 #else
 static inline int check_version(const struct load_info *info,
@@ -3907,30 +3895,6 @@ out_unlocked:
 	return err;
 }
 
-#if DISABLE_SIG_CHK
-static int complete_formation(struct module *mod, struct load_info *info)
-{
-	mutex_lock(&module_mutex);
-
-	/* Find duplicate symbols (must be called under lock). */
-	verify_exported_symbols(mod);
-
-	/* This relies on module_mutex for list integrity. */
-	module_bug_finalize(info->hdr, info->sechdrs, mod);
-
-	module_enable_ro(mod, false);
-	module_enable_nx(mod);
-	module_enable_x(mod);
-	trace_android_vh_set_module_permit_before_init(mod);
-
-	/* Mark state as coming so strong_try_module_get() ignores us,
-	 * but kallsyms etc. can see us. */
-	mod->state = MODULE_STATE_COMING;
-	mutex_unlock(&module_mutex);
-
-	return 0;
-}
-#else
 static int complete_formation(struct module *mod, struct load_info *info)
 {
 	int err;
@@ -3961,7 +3925,6 @@ out:
 	mutex_unlock(&module_mutex);
 	return err;
 }
-#endif
 
 static int prepare_coming_module(struct module *mod)
 {

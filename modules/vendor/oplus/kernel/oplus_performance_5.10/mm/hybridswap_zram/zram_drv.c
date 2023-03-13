@@ -1837,6 +1837,9 @@ static void zram_reset_device(struct zram *zram)
 	memset(&zram->stats, 0, sizeof(zram->stats));
 	zcomp_destroy(comp);
 	reset_bdev(zram);
+#ifdef CONFIG_HYBRIDSWAP_CORE
+	hybridswap_unbind(zram);
+#endif
 }
 
 static ssize_t disksize_store(struct device *dev,
@@ -1989,6 +1992,7 @@ static DEVICE_ATTR_RW(hybridswap_swapd_pause);
 #ifdef CONFIG_HYBRIDSWAP_CORE
 static DEVICE_ATTR_RW(hybridswap_core_enable);
 static DEVICE_ATTR_RW(hybridswap_loop_device);
+static DEVICE_ATTR_RW(backing_dev);
 static DEVICE_ATTR_RW(hybridswap_dev_life);
 static DEVICE_ATTR_RW(hybridswap_quota_day);
 static DEVICE_ATTR_RO(hybridswap_report);
@@ -2036,6 +2040,7 @@ static struct attribute *zram_disk_attrs[] = {
 	&dev_attr_hybridswap_meminfo.attr,
 	&dev_attr_hybridswap_stat_snap.attr,
 	&dev_attr_hybridswap_loop_device.attr,
+	&dev_attr_backing_dev.attr,
 	&dev_attr_hybridswap_dev_life.attr,
 	&dev_attr_hybridswap_quota_day.attr,
 	&dev_attr_hybridswap_zram_increase.attr,

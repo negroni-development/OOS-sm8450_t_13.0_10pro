@@ -24,6 +24,9 @@ struct qrtr_endpoint {
 	int (*xmit)(struct qrtr_endpoint *ep, struct sk_buff *skb);
 	/* private: not for endpoint use */
 	struct qrtr_node *node;
+	#ifdef CONFIG_OPLUS_POWERINFO_STANDBY_DEBUG
+	struct device *dev;
+	#endif
 };
 
 int qrtr_endpoint_register(struct qrtr_endpoint *ep, unsigned int net_id,
@@ -42,4 +45,6 @@ void qrtr_ns_remove(void);
 int qrtr_peek_pkt_size(const void *data);
 
 int qrtr_get_service_id(unsigned int node_id, unsigned int port_id);
+
+void qrtr_print_wakeup_reason(const void *data);
 #endif

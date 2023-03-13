@@ -16,15 +16,19 @@
 #include <soc/oplus/device_info.h>
 #include <linux/notifier.h>
 #include <linux/module.h>
+#include "dsi_display.h"
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+#include "oplus_onscreenfingerprint.h"
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 static enum oplus_display_support_list  oplus_display_vendor =
 	OPLUS_DISPLAY_UNKNOW;
 static enum oplus_display_power_status oplus_display_status =
 	OPLUS_DISPLAY_POWER_OFF;
-static enum oplus_display_scene oplus_siaplay_save_scene =
-	OPLUS_DISPLAY_NORMAL_SCENE;
-
 static BLOCKING_NOTIFIER_HEAD(oplus_display_notifier_list);
+/* add for dual panel */
+static struct dsi_display *current_display = NULL;
 
 int oplus_display_register_client(struct notifier_block *nb)
 {
@@ -187,19 +191,6 @@ enum oplus_display_power_status get_oplus_display_power_status(void)
 }
 EXPORT_SYMBOL(get_oplus_display_power_status);
 
-void set_oplus_display_scene(enum oplus_display_scene display_scene)
-{
-	oplus_siaplay_save_scene = display_scene;
-}
-EXPORT_SYMBOL(set_oplus_display_scene);
-
-enum oplus_display_scene get_oplus_display_scene(void)
-{
-	return oplus_siaplay_save_scene;
-}
-
-EXPORT_SYMBOL(get_oplus_display_scene);
-
 bool is_oplus_display_support_feature(enum oplus_display_feature feature_name)
 {
 	bool ret = false;
@@ -248,4 +239,59 @@ bool is_oplus_display_support_feature(enum oplus_display_feature feature_name)
 	return ret;
 }
 
+/* add for dual panel */
+void oplus_display_set_current_display(void *dsi_display)
+{
+	struct dsi_display *display = dsi_display;
+	current_display = display;
+}
 
+/* update current display when panel is enabled and disabled */
+void oplus_display_update_current_display(void)
+{
+	struct dsi_display *primary_display = get_main_display();
+	struct dsi_display *secondary_display = get_sec_display();
+
+	pr_debug("[DEBUG][%s:%d]start\n", __func__, __LINE__);
+
+#if defined(OPLUS_FEATURE_PXLW_IRIS5)
+	if (iris_is_chip_supported()) {
+		if (primary_display && primary_display->panel) {
+			current_display = primary_display;
+		} else {
+			current_display = NULL;
+			pr_err("[ERROR][%s:%d]failed to get current display\n", __func__, __LINE__);
+		}
+		return;
+	}
+#endif /* OPLUS_FEATURE_PXLW_IRIS5 */
+
+	if ((!primary_display && !secondary_display) || (!primary_display->panel && !secondary_display->panel)) {
+		current_display = NULL;
+	} else if ((primary_display && !secondary_display) || (primary_display->panel && !secondary_display->panel)) {
+		current_display = primary_display;
+	} else if ((!primary_display && secondary_display) || (!primary_display->panel && secondary_display->panel)) {
+		current_display = secondary_display;
+	} else if (primary_display->panel->panel_initialized && !secondary_display->panel->panel_initialized) {
+		current_display = primary_display;
+	} else if (!primary_display->panel->panel_initialized && secondary_display->panel->panel_initialized) {
+		current_display = secondary_display;
+	} else if (primary_display->panel->panel_initialized && secondary_display->panel->panel_initialized) {
+		current_display = primary_display;
+	}
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported()) {
+		oplus_ofp_update_display_id();
+	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
+
+	pr_debug("[DEBUG][%s:%d]end\n", __func__, __LINE__);
+
+	return;
+}
+
+struct dsi_display *oplus_display_get_current_display(void)
+{
+	return current_display;
+}

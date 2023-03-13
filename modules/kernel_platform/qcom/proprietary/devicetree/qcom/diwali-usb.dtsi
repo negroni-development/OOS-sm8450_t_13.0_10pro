@@ -16,16 +16,15 @@
 			<&gcc GCC_CFG_NOC_USB3_PRIM_AXI_CLK>,
 			<&gcc GCC_AGGRE_USB3_PRIM_AXI_CLK>,
 			<&gcc GCC_USB30_PRIM_MOCK_UTMI_CLK>,
-			<&gcc GCC_USB30_PRIM_SLEEP_CLK>,
-			<&gcc GCC_USB3_0_CLKREF_EN>;
+			<&gcc GCC_USB30_PRIM_SLEEP_CLK>;
 		clock-names = "core_clk", "iface_clk", "bus_aggr_clk",
-					"utmi_clk", "sleep_clk", "xo";
+					"utmi_clk", "sleep_clk";
 
 		resets = <&gcc GCC_USB30_PRIM_BCR>;
 		reset-names = "core_reset";
 
 		interrupts-extended = <&pdc 14 IRQ_TYPE_EDGE_RISING>,
-				      <&intc 130 IRQ_TYPE_LEVEL_HIGH>,
+				      <&intc GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH>,
 				      <&pdc 17 IRQ_TYPE_LEVEL_HIGH>,
 				      <&pdc 15 IRQ_TYPE_EDGE_RISING>;
 		interrupt-names = "dp_hs_phy_irq", "pwr_event_irq",
@@ -44,14 +43,13 @@
 			0x130 /* GSI_RING_BASE_ADDR_L */
 			0x144 /* GSI_RING_BASE_ADDR_H */
 			0x1a4>; /* GSI_IF_STS */
-		qcom,dwc-usb3-msm-tx-fifo-size = <27696>;
 
 		interconnect-names = "usb-ddr", "usb-ipa", "ddr-usb";
 		interconnects = <&aggre1_noc MASTER_USB3_0 &mc_virt SLAVE_EBI1>,
 				<&aggre1_noc MASTER_USB3_0 &config_noc SLAVE_IPA_CFG>,
 				<&gem_noc MASTER_APPSS_PROC &config_noc SLAVE_USB3_0>;
 
-		dwc3@a600000 {
+		dwc3: dwc3@a600000 {
 			compatible = "snps,dwc3";
 			reg = <0xa600000 0xd93c>;
 
@@ -118,8 +116,9 @@
 		vdda33-supply = <&L2B>;
 		qcom,vdd-voltage-level = <0 880000 918750>;
 
-		clocks = <&rpmhcc RPMH_CXO_CLK>;
-		clock-names = "ref_clk_src";
+		clocks = <&rpmhcc RPMH_CXO_CLK>,
+			<&gcc GCC_EUSB3_0_CLKREF_EN>;
+		clock-names = "ref_clk_src", "ref_clk";
 
 		resets = <&gcc GCC_QUSB2PHY_PRIM_BCR>;
 		reset-names = "phy_reset";
@@ -145,10 +144,11 @@
 			<&gcc GCC_USB3_PRIM_PHY_PIPE_CLK_SRC>,
 			<&usb3_phy_wrapper_gcc_usb30_pipe_clk>,
 			<&rpmhcc RPMH_CXO_CLK>,
-			<&gcc GCC_USB3_PRIM_PHY_COM_AUX_CLK>;
+			<&gcc GCC_USB3_PRIM_PHY_COM_AUX_CLK>,
+			<&gcc GCC_USB3_0_CLKREF_EN>;
 		clock-names = "aux_clk", "pipe_clk", "pipe_clk_mux",
 				"pipe_clk_ext_src", "ref_clk_src",
-				"com_aux_clk";
+				"com_aux_clk", "ref_clk";
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&usb3phy_portselect_default>;

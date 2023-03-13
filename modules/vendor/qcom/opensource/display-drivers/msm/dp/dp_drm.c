@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <drm/drm_atomic_helper.h>
@@ -336,7 +337,7 @@ int dp_connector_set_colorspace(struct drm_connector *connector,
 
 	sde_conn = to_sde_connector(connector);
 	if (!sde_conn->drv_panel) {
-		pr_err("invalid dp panel\n");
+		DP_ERR("invalid dp panel\n");
 		return -EINVAL;
 	}
 
@@ -419,6 +420,11 @@ int dp_connector_get_mode_info(struct drm_connector *connector,
 		DP_ERR("error getting mixer count. rc:%d\n", rc);
 		return rc;
 	}
+	/* reset dp connector lm_mask for every connection event and
+	 * this will get re-populated in resource manager based on
+	 * resolution and topology of dp display.
+	 */
+	sde_conn->lm_mask = 0;
 
 	topology->num_enc = no_enc;
 	topology->num_intf = single_intf;

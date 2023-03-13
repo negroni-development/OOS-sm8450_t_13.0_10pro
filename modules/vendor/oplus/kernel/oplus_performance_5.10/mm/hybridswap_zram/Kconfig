@@ -41,13 +41,13 @@ config HYBRIDSWAP_ZRAM_MEMORY_TRACKING
 config HYBRIDSWAP
 	bool "Enable Hybridswap"
 	depends on MEMCG && HYBRIDSWAP_ZRAM && !HYBRIDSWAP_ZRAM_WRITEBACK
-	default y
+	default n
 	help
 	  Hybridswap is a intelligent memory management solution.
 
 config HYBRIDSWAP_SWAPD
 	bool "Enable hybridswap swapd thread to reclaim anon pages in background"
-	default y
+	default n
 	depends on HYBRIDSWAP
 	help
 	  swapd is a kernel thread that reclaim anonymous pages in the
@@ -58,8 +58,8 @@ config HYBRIDSWAP_SWAPD
 # Selected when system need hybridswap container
 config HYBRIDSWAP_CORE
 	bool "Hybridswap container device support"
-	depends on HYBRIDSWAP_ZRAM && HYBRIDSWAP
-	default y
+	depends on HYBRIDSWAP_ZRAM && HYBRIDSWAP && !HYBRIDSWAP_ZRAM_WRITEBACK
+	default n
 	help
 	  Say Y here if you want to use the hybridswap
 	  as the backend device in ZRAM.

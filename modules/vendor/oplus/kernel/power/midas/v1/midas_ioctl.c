@@ -124,7 +124,9 @@ static void update_or_create_entry_locked(uid_t uid, struct task_struct *p, u64 
 		rcu_read_lock();
 		task = find_task_by_vpid(midas_mmap_buf.entrys[i].id[ID_TGID]);
 		rcu_read_unlock();
-		strncpy(midas_mmap_buf.entrys[i].tgid_name, task->comm, TASK_COMM_LEN);
+
+		if (task != NULL)
+		    strncpy(midas_mmap_buf.entrys[i].tgid_name, task->comm, TASK_COMM_LEN);
 	}
 	/* the unit of time_in_state is ms */
 	midas_mmap_buf.entrys[i].time_in_state[state] += DIV_ROUND_CLOSEST(cputime, NSEC_PER_MSEC);
@@ -227,7 +229,7 @@ static const struct midas_ioctl_desc midas_ioctls[] = {
 	MIDAS_IOCTL_DEF(MIDAS_IOCTL_CLEAR_TRACK_UID, midas_ioctl_clear_track_uid),
 };
 
-#define KDATA_SIZE 	512
+#define KDATA_SIZE	512
 long midas_dev_ioctl(struct file *filp,
 		unsigned int cmd, unsigned long arg)
 {

@@ -15,6 +15,7 @@
 #include "sde_connector.h"
 #include "sde_crtc.h"
 #include "sde_encoder_phys.h"
+#include <uapi/linux/sched/types.h>
 
 #include "dsi_display.h"
 #include "dsi_panel.h"
@@ -23,6 +24,7 @@
 #include "dsi_defs.h"
 
 #include "oplus_adfr.h"
+#include "oplus_dsi_support.h"
 
 #define OPLUS_ADFR_CONFIG_GLOBAL (1<<0)
 #define OPLUS_ADFR_CONFIG_FAKEFRAME (1<<1)
@@ -86,6 +88,7 @@ static u32 oplus_adfr_idle_mode = OPLUS_ADFR_IDLE_OFF;
 struct oplus_te_refcount te_refcount = {0, 0, 0, 0};
 /* dynamic te detect */
 struct oplus_adfr_dynamic_te oplus_adfr_dynamic_te = {0};
+DEFINE_MUTEX(dynamic_te_lock);
 
 /* --------------- adfr misc ---------------*/
 
@@ -183,6 +186,24 @@ inline bool oplus_adfr_is_support(void)
 
 /* --------------- msm_drv ---------------*/
 
+static void oplus_adfr_thread_priority_worker(struct kthread_work *work)
+{
+	int ret = 0;
+	struct sched_param param = { 0 };
+	struct task_struct *task = current->group_leader;
+
+	/**
+	 * this priority was found during empiric testing to have appropriate
+	 * realtime scheduling to process display updates and interact with
+	 * other real time and normal priority task
+	 */
+	param.sched_priority = 16;
+	ret = sched_setscheduler(task, SCHED_FIFO, &param);
+	if (ret)
+		pr_warn("pid:%d name:%s priority update failed: %d\n",
+			current->tgid, task->comm, ret);
+}
+
 int oplus_adfr_thread_create(void *msm_priv, void *msm_ddev, void *msm_dev)
 {
 	struct msm_drm_private *priv;
@@ -203,7 +224,9 @@ int oplus_adfr_thread_create(void *msm_priv, void *msm_ddev, void *msm_dev)
 			kthread_run(kthread_worker_fn,
 				&priv->adfr_thread[i].worker,
 				"adfr:%d", priv->adfr_thread[i].crtc_id);
+		kthread_init_work(&priv->thread_priority_work, oplus_adfr_thread_priority_worker);
 		kthread_queue_work(&priv->adfr_thread[i].worker, &priv->thread_priority_work);
+		kthread_flush_work(&priv->thread_priority_work);
 
 		if (IS_ERR(priv->adfr_thread[i].thread)) {
 			dev_err(dev, "kVRR failed to create adfr_commit kthread\n");
@@ -708,6 +731,13 @@ exit:
 	return rc;
 }
 
+void oplus_adfr_set_dynamic_te_config(int config)
+{
+	mutex_lock(&dynamic_te_lock);
+	oplus_adfr_dynamic_te.config = config;
+	mutex_unlock(&dynamic_te_lock);
+}
+
 /* dynamic te timer */
 enum hrtimer_restart oplus_adfr_dynamic_te_timer_handler(struct hrtimer *timer)
 {
@@ -877,17 +907,46 @@ error:
 ssize_t oplus_adfr_get_dynamic_te(struct kobject *obj,
 	struct kobj_attribute *attr, char *buf)
 {
+	struct dsi_display *display = oplus_display_get_current_display();
+	struct dsi_mode_info timing;
 	int refresh_rate;
 
-	refresh_rate = oplus_adfr_dynamic_te.refresh_rate;
-	DSI_INFO("kVRR dynamic te refresh rate is %d\n", refresh_rate);
+	if (display == NULL) {
+		DSI_ERR("%s error :NULL display", __func__);
+		return -EINVAL;
+	}
+
+	if (display->panel == NULL) {
+		DSI_ERR("%s error :NULL panel", __func__);
+		return -EINVAL;
+	}
+
+	if (display->panel->cur_mode == NULL) {
+		DSI_ERR("%s error :NULL cur_mode", __func__);
+		return -EINVAL;
+	}
+
+	if (!gpio_is_valid(display->panel->dynamic_te_gpio)) {
+		timing = display->panel->cur_mode->timing;
+		refresh_rate = timing.refresh_rate;
+		return sprintf(buf, "%d\n", refresh_rate);
+	}
+
+	if (!strcmp(display->display_type, "primary")) {
+		refresh_rate = oplus_adfr_dynamic_te.refresh_rate;
+		DSI_INFO("kVRR dynamic te refresh rate is %d\n", refresh_rate);
+	}
+	if (!strcmp(display->display_type, "secondary")) {
+		timing = display->panel->cur_mode->timing;
+		refresh_rate = timing.refresh_rate;
+	}
 	return sprintf(buf, "%d\n", refresh_rate);
 }
 
 ssize_t oplus_adfr_set_dynamic_te(struct kobject *obj,
 	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-	struct dsi_display *display = get_main_display();
+	struct dsi_display *display = oplus_display_get_current_display();
 	unsigned int dynamic_te_irq;
 	int config = 0;
 
@@ -907,7 +966,7 @@ ssize_t oplus_adfr_set_dynamic_te(struct kobject *obj,
 	}
 
 	sscanf(buf, "%du", &config);
-	oplus_adfr_dynamic_te.config = config;
+	oplus_adfr_set_dynamic_te_config(config);
 
 	dynamic_te_irq = gpio_to_irq(display->panel->dynamic_te_gpio);
 
@@ -924,7 +983,7 @@ ssize_t oplus_adfr_set_dynamic_te(struct kobject *obj,
 
 int oplus_display_set_dynamic_te(void *buf)
 {
-	struct dsi_display *display = get_main_display();
+	struct dsi_display *display = oplus_display_get_current_display();
 	unsigned int dynamic_te_irq;
 	uint32_t *buf_temp = buf;
 	uint32_t config = *buf_temp;
@@ -944,7 +1003,7 @@ int oplus_display_set_dynamic_te(void *buf)
 		return -EINVAL;
 	}
 
-	oplus_adfr_dynamic_te.config = config;
+	oplus_adfr_set_dynamic_te_config(config);
 
 	dynamic_te_irq = gpio_to_irq(display->panel->dynamic_te_gpio);
 
@@ -961,10 +1020,39 @@ int oplus_display_set_dynamic_te(void *buf)
 
 int oplus_display_get_dynamic_te(void *buf)
 {
+	struct dsi_display *display = oplus_display_get_current_display();
+	struct dsi_mode_info timing;
 	uint32_t *refresh_rate = buf;
 
-	*refresh_rate = oplus_adfr_dynamic_te.refresh_rate;
-	DSI_DEBUG("kVRR dynamic te refresh rate is %d\n", *refresh_rate);
+	if (display == NULL) {
+		DSI_ERR("%s error :NULL display", __func__);
+		return -EINVAL;
+	}
+
+	if (display->panel == NULL) {
+		DSI_ERR("%s error :NULL panel", __func__);
+		return -EINVAL;
+	}
+
+	if (display->panel->cur_mode == NULL) {
+		DSI_ERR("%s error :NULL cur_mode", __func__);
+		return -EINVAL;
+	}
+
+	if (!gpio_is_valid(display->panel->dynamic_te_gpio)) {
+		timing = display->panel->cur_mode->timing;
+		*refresh_rate = timing.refresh_rate;
+		return 0;
+	}
+
+	if (!strcmp(display->display_type, "primary")) {
+		*refresh_rate = oplus_adfr_dynamic_te.refresh_rate;
+		DSI_INFO("kVRR dynamic te refresh rate is %d\n", *refresh_rate);
+	}
+	if (!strcmp(display->display_type, "secondary")) {
+		timing = display->panel->cur_mode->timing;
+		*refresh_rate = timing.refresh_rate;
+	}
 
 	return 0;
 }
@@ -1475,7 +1563,6 @@ void sde_encoder_adfr_vsync_switch(void *enc) {
 	}
 
 	drm_conn = sde_enc->cur_master->connector;
-
 	if ((drm_conn == NULL) || (drm_conn->encoder == NULL)) {
 		SDE_ERROR("kVRR : invalid drm connector parameters\n");
 		return;
@@ -1722,27 +1809,90 @@ int oplus_adfr_vsync_source_switch(void *dsi_panel, u8 v_source) {
 		return -EFAULT;
 	}
 
+	SDE_ATRACE_BEGIN("oplus_adfr_vsync_source_switch");
+
 	sde_enc->te_source = v_source;
-	SDE_ATRACE_INT("te_source", sde_enc->te_source);
 	sde_encoder_helper_switch_vsync(drm_enc, false);
 	SDE_ATRACE_INT("te_source", sde_enc->te_source);
+
+	SDE_ATRACE_END("oplus_adfr_vsync_source_switch");
 
 	return 0;
 }
 
-int oplus_adfr_vsync_source_reset(void *dsi_panel) {
-	struct dsi_panel *panel = dsi_panel;
+int oplus_adfr_vsync_source_reset(void *enc) {
+	struct drm_encoder *drm_enc = enc;
+	struct sde_encoder_virt *sde_enc = NULL;
+	struct drm_connector *drm_conn;
+	struct sde_connector *sde_conn;
+	struct drm_bridge *temp_bridge;
+	struct dsi_bridge *c_bridge;
+	struct dsi_display *display;
+	struct dsi_panel *panel;
 	u8 v_source;
 
-	if (!panel) {
-		DSI_ERR("invalid panel params\n");
-		return -EINVAL;
+	if (drm_enc == NULL) {
+		SDE_ERROR("kVRR : invalid drm encoder parameters\n");
+		return 0;
 	}
+
+	sde_enc = to_sde_encoder_virt(drm_enc);
+	if ((sde_enc->cur_master == NULL) || (sde_enc->cur_master->connector == NULL)) {
+		SDE_ERROR("kVRR : invalid sde encoder parameters\n");
+		return 0;
+	}
+
+	drm_conn = sde_enc->cur_master->connector;
+	if ((drm_conn == NULL) || (drm_conn->encoder == NULL)) {
+		SDE_ERROR("kVRR : invalid drm connector parameters\n");
+		return 0;
+	}
+
+	sde_conn = to_sde_connector(drm_conn);
+	if (sde_conn == NULL) {
+		SDE_ERROR("kVRR : invalid sde connector parameters\n");
+		return 0;
+	}
+	if (sde_conn->connector_type != DRM_MODE_CONNECTOR_DSI) {
+		SDE_DEBUG("kVRR : Only reset when display is dsi_display\n");
+		return 0;
+	}
+
+	if (drm_bridge_chain_get_first_bridge(drm_conn->encoder) == NULL) {
+		SDE_ERROR("kVRR : invalid drm bridge parameters\n");
+		return 0;
+	}
+
+	temp_bridge = drm_bridge_chain_get_first_bridge(drm_conn->encoder);
+	c_bridge = to_dsi_bridge(temp_bridge);
+	display = c_bridge->display;
+
+	if ((display == NULL) || (display->panel == NULL)) {
+		SDE_ERROR("kVRR : invalid dsi display parameters\n");
+		return 0;
+	}
+	panel = display->panel;
+
+	if (panel->is_switching) {
+		panel->is_switching = false;
+		SDE_INFO("kVRR Don't reset TE when timing switch");
+		return 0;
+	}
+
+	if (panel->power_mode == SDE_MODE_DPMS_LP1 ||
+			panel->power_mode == SDE_MODE_DPMS_LP2) {
+		SDE_INFO("kVRR Don't reset TE in AOD mode");
+		return 0;
+	}
+
+	SDE_ATRACE_BEGIN("oplus_adfr_vsync_source_reset");
 
 	v_source = oplus_adfr_get_vsync_source(panel);
 	SDE_INFO("kVRR : vsync source switched to %d when resume\n", v_source);
-	oplus_adfr_vsync_source_switch(panel, v_source);
 	panel->need_te_source_switch = false;
+	oplus_adfr_vsync_source_switch(panel, v_source);
+
+	SDE_ATRACE_END("oplus_adfr_vsync_source_reset");
 
 	return 0;
 }
@@ -1782,6 +1932,8 @@ int oplus_adfr_timing_vsync_source_switch(void *dsi_panel) {
 		return -EFAULT;
 	}
 
+	SDE_ATRACE_BEGIN("oplus_adfr_timing_vsync_source_switch");
+
 	if (panel->cur_h_active != panel->cur_mode->timing.h_active) {
 		v_source = OPLUS_TE_SOURCE_TE;
 		SDE_INFO("kVRR : vsync source switched to %d before resolution switch\n", v_source);
@@ -1795,6 +1947,8 @@ int oplus_adfr_timing_vsync_source_switch(void *dsi_panel) {
 			oplus_adfr_vsync_source_switch(panel, v_source);
 		}
 	}
+
+	SDE_ATRACE_END("oplus_adfr_timing_vsync_source_switch");
 	return 0;
 }
 
@@ -1802,6 +1956,7 @@ void sde_encoder_adfr_vsync_source_switch(void *enc) {
 	struct drm_encoder *drm_enc = enc;
 	struct sde_encoder_virt *sde_enc = to_sde_encoder_virt(drm_enc);
 	struct drm_connector *drm_conn;
+	struct sde_connector *sde_conn;
 	struct drm_bridge *temp_bridge;
 	struct dsi_bridge *c_bridge;
 	struct dsi_display *display;
@@ -1809,14 +1964,23 @@ void sde_encoder_adfr_vsync_source_switch(void *enc) {
 	u8 v_source;
 
 	if ((drm_enc == NULL) || (sde_enc->cur_master == NULL) || (sde_enc->cur_master->connector == NULL)) {
-		SDE_DEBUG("kVRR : invalid drm encoder parameters\n");
+		SDE_ERROR("kVRR : invalid drm encoder parameters\n");
 		return;
 	}
 
 	drm_conn = sde_enc->cur_master->connector;
-
 	if ((drm_conn == NULL) || (drm_conn->encoder == NULL)) {
 		SDE_ERROR("kVRR : invalid drm connector parameters\n");
+		return;
+	}
+
+	sde_conn = to_sde_connector(drm_conn);
+	if (sde_conn == NULL) {
+		SDE_ERROR("kVRR : invalid sde connector parameters\n");
+		return;
+	}
+	if (sde_conn->connector_type != DRM_MODE_CONNECTOR_DSI) {
+		SDE_DEBUG("kVRR : Only switch when display is dsi_display\n");
 		return;
 	}
 
@@ -1847,8 +2011,8 @@ void sde_encoder_adfr_vsync_source_switch(void *enc) {
 		v_source = oplus_adfr_get_vsync_source(panel);
 		sde_encoder_wait_for_event(drm_enc, MSM_ENC_TX_COMPLETE);
 		SDE_INFO("kVRR : vsync source switched to %d when needed\n", v_source);
-		oplus_adfr_vsync_source_switch(panel, v_source);
 		panel->need_te_source_switch = false;
+		oplus_adfr_vsync_source_switch(panel, v_source);
 
 		/* update fakeframe setting after resolution switch */
 		oplus_adfr_fakeframe_status_update(panel, false);
@@ -2223,7 +2387,7 @@ static int dsi_panel_send_auto_minfps_dcs(struct dsi_panel *panel,
 		count = mode->priv_info->cmd_sets[DSI_CMD_QSYNC_MIN_FPS_0].count;
 
 		if (count == 0) {
-			DSI_ERR("kVRR [%s] No commands to be sent for manual min fps.\n", panel->name);
+			DSI_INFO("kVRR [%s] No commands to be sent for manual min fps.\n", panel->name);
 			goto exit;
 		}
 

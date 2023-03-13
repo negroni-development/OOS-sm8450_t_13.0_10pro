@@ -9,13 +9,11 @@
 #include "sa_mutex.h"
 #include <linux/version.h>
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
 #define MUTEX_FLAGS		0x07
 static inline struct task_struct *__mutex_owner(struct mutex *lock)
 {
 	return (struct task_struct *)(atomic_long_read(&lock->owner) & ~MUTEX_FLAGS);
 }
-#endif
 
 static void mutex_list_add_ux(struct list_head *entry, struct list_head *head)
 {
@@ -31,18 +29,16 @@ static void mutex_list_add_ux(struct list_head *entry, struct list_head *head)
 		}
 	}
 
-	if (pos == head) {
+	if (pos == head)
 		list_add_tail(entry, head);
-	}
 }
 
 bool mutex_list_add(struct task_struct *task, struct list_head *entry, struct list_head *head, struct mutex *lock)
 {
 	bool is_ux = test_task_ux(task);
 
-	if (!entry || !head || !lock) {
+	if (!entry || !head || !lock)
 		return false;
-	}
 
 	if (is_ux) {
 		mutex_list_add_ux(entry, head);
@@ -62,25 +58,20 @@ void mutex_set_inherit_ux(struct mutex *lock, struct task_struct *task)
 
 	is_ux = test_set_inherit_ux(task);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0)
 	owner = __mutex_owner(lock);
-#else
-	owner = lock->owner;
-#endif
 
 	if (is_ux && !test_inherit_ux(owner, INHERIT_UX_MUTEX)) {
 		int type = get_ux_state_type(owner);
-		if ((UX_STATE_NONE == type) || (UX_STATE_INHERIT == type)) {
+
+		if ((type == UX_STATE_NONE) || (type == UX_STATE_INHERIT))
 			set_inherit_ux(owner, INHERIT_UX_MUTEX, oplus_get_ux_depth(task), oplus_get_ux_state(task));
-		}
 	}
 }
 
 void mutex_unset_inherit_ux(struct mutex *lock, struct task_struct *task)
 {
-	if (test_inherit_ux(task, INHERIT_UX_MUTEX)) {
+	if (test_inherit_ux(task, INHERIT_UX_MUTEX))
 		unset_inherit_ux(task, INHERIT_UX_MUTEX);
-	}
 }
 
 /* implement vender hook in kernel/locking/mutex.c */

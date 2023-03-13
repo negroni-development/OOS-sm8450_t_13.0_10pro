@@ -92,6 +92,7 @@ static ssize_t press_offset_write_proc(struct file *file, const char __user *buf
 static const struct proc_ops press_offset_fops = {
         .proc_read = press_offset_read_proc,
         .proc_write = press_offset_write_proc,
+        .proc_lseek = default_llseek,
 };
 #else
 static struct file_operations press_offset_fops = {

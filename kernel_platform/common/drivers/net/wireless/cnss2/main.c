@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/delay.h>
@@ -9,6 +9,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/of_gpio.h>
 #include <linux/pm_wakeup.h>
 #include <linux/reboot.h>
 #include <linux/rwsem.h>
@@ -28,6 +29,7 @@
 #include "bus.h"
 #include "debug.h"
 #include "genl.h"
+#include "reg.h"
 
 #define CNSS_DUMP_FORMAT_VER		0x11
 #define CNSS_DUMP_FORMAT_VER_V2		0x22
@@ -53,6 +55,7 @@
 #endif
 #define CNSS_BDF_TYPE_DEFAULT		CNSS_BDF_ELF
 #define CNSS_TIME_SYNC_PERIOD_DEFAULT	900000
+#define CNSS_MIN_TIME_SYNC_PERIOD	2000
 #define CNSS_DMS_QMI_CONNECTION_WAIT_MS 50
 #define CNSS_DMS_QMI_CONNECTION_WAIT_RETRY 200
 #define CNSS_DAEMON_CONNECT_TIMEOUT_MS  30000
@@ -67,6 +70,8 @@ enum cnss_cal_db_op {
 };
 
 static struct cnss_plat_data *plat_env;
+
+static bool cnss_allow_driver_loading;
 
 static DECLARE_RWSEM(cnss_pm_sem);
 
@@ -90,7 +95,6 @@ struct cnss_driver_event {
 };
 
 #ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
-//#Huitao@CONNECTIVITY.WIFI.HARDWARE.SWITCH.2877804 , add for wifi fw monitor
 static unsigned int cnssprobestate = 0;
 #endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 
@@ -98,6 +102,11 @@ static void cnss_set_plat_priv(struct platform_device *plat_dev,
 			       struct cnss_plat_data *plat_priv)
 {
 	plat_env = plat_priv;
+}
+
+bool cnss_check_driver_loading_allowed(void)
+{
+	return cnss_allow_driver_loading;
 }
 
 struct cnss_plat_data *cnss_get_plat_priv(struct platform_device *plat_dev)
@@ -479,7 +488,10 @@ static int cnss_fw_mem_ready_hdlr(struct cnss_plat_data *plat_priv)
 
 	if (plat_priv->hds_enabled)
 		cnss_wlfw_bdf_dnld_send_sync(plat_priv, CNSS_BDF_HDS);
+
 	cnss_wlfw_bdf_dnld_send_sync(plat_priv, CNSS_BDF_REGDB);
+
+	cnss_wlfw_ini_file_send_sync(plat_priv, WLFW_CONN_ROAM_INI_V01);
 
 	ret = cnss_wlfw_bdf_dnld_send_sync(plat_priv,
 					   plat_priv->ctrl_params.bdf_type);
@@ -1225,6 +1237,208 @@ static inline int cnss_register_esoc(struct cnss_plat_data *plat_priv)
 static inline void cnss_unregister_esoc(struct cnss_plat_data *plat_priv) {}
 #endif
 
+int cnss_enable_dev_sol_irq(struct cnss_plat_data *plat_priv)
+{
+	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
+	int ret = 0;
+
+	if (sol_gpio->dev_sol_gpio < 0 || sol_gpio->dev_sol_irq <= 0)
+		return 0;
+
+	enable_irq(sol_gpio->dev_sol_irq);
+	ret = enable_irq_wake(sol_gpio->dev_sol_irq);
+	if (ret)
+		cnss_pr_err("Failed to enable device SOL as wake IRQ, err = %d\n",
+			    ret);
+
+	return ret;
+}
+
+int cnss_disable_dev_sol_irq(struct cnss_plat_data *plat_priv)
+{
+	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
+	int ret = 0;
+
+	if (sol_gpio->dev_sol_gpio < 0 || sol_gpio->dev_sol_irq <= 0)
+		return 0;
+
+	ret = disable_irq_wake(sol_gpio->dev_sol_irq);
+	if (ret)
+		cnss_pr_err("Failed to disable device SOL as wake IRQ, err = %d\n",
+			    ret);
+	disable_irq(sol_gpio->dev_sol_irq);
+
+	return ret;
+}
+
+int cnss_get_dev_sol_value(struct cnss_plat_data *plat_priv)
+{
+	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
+
+	if (sol_gpio->dev_sol_gpio < 0)
+		return -EINVAL;
+
+	return gpio_get_value(sol_gpio->dev_sol_gpio);
+}
+
+static irqreturn_t cnss_dev_sol_handler(int irq, void *data)
+{
+	struct cnss_plat_data *plat_priv = data;
+	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
+
+	sol_gpio->dev_sol_counter++;
+	cnss_pr_dbg("WLAN device SOL IRQ (%u) is asserted #%u\n",
+		    irq, sol_gpio->dev_sol_counter);
+
+	/* Make sure abort current suspend */
+	cnss_pm_stay_awake(plat_priv);
+	cnss_pm_relax(plat_priv);
+	pm_system_wakeup();
+
+	cnss_bus_handle_dev_sol_irq(plat_priv);
+
+	return IRQ_HANDLED;
+}
+
+static int cnss_init_dev_sol_gpio(struct cnss_plat_data *plat_priv)
+{
+	struct device *dev = &plat_priv->plat_dev->dev;
+	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
+	int ret = 0;
+
+	sol_gpio->dev_sol_gpio = of_get_named_gpio(dev->of_node,
+						   "wlan-dev-sol-gpio", 0);
+	if (sol_gpio->dev_sol_gpio < 0)
+		goto out;
+
+	cnss_pr_dbg("Get device SOL GPIO (%d) from device node\n",
+		    sol_gpio->dev_sol_gpio);
+
+	ret = gpio_request(sol_gpio->dev_sol_gpio, "wlan_dev_sol_gpio");
+	if (ret) {
+		cnss_pr_err("Failed to request device SOL GPIO, err = %d\n",
+			    ret);
+		goto out;
+	}
+
+	gpio_direction_input(sol_gpio->dev_sol_gpio);
+	sol_gpio->dev_sol_irq = gpio_to_irq(sol_gpio->dev_sol_gpio);
+
+	ret = request_irq(sol_gpio->dev_sol_irq, cnss_dev_sol_handler,
+			  IRQF_TRIGGER_FALLING, "wlan_dev_sol_irq", plat_priv);
+	if (ret) {
+		cnss_pr_err("Failed to request device SOL IRQ, err = %d\n", ret);
+		goto free_gpio;
+	}
+
+	return 0;
+
+free_gpio:
+	gpio_free(sol_gpio->dev_sol_gpio);
+out:
+	return ret;
+}
+
+static void cnss_deinit_dev_sol_gpio(struct cnss_plat_data *plat_priv)
+{
+	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
+
+	if (sol_gpio->dev_sol_gpio < 0)
+		return;
+
+	free_irq(sol_gpio->dev_sol_irq, plat_priv);
+	gpio_free(sol_gpio->dev_sol_gpio);
+}
+
+int cnss_set_host_sol_value(struct cnss_plat_data *plat_priv, int value)
+{
+	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
+
+	if (sol_gpio->host_sol_gpio < 0)
+		return -EINVAL;
+
+	if (value)
+		cnss_pr_dbg("Assert host SOL GPIO\n");
+	gpio_set_value(sol_gpio->host_sol_gpio, value);
+
+	return 0;
+}
+
+int cnss_get_host_sol_value(struct cnss_plat_data *plat_priv)
+{
+	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
+
+	if (sol_gpio->host_sol_gpio < 0)
+		return -EINVAL;
+
+	return gpio_get_value(sol_gpio->host_sol_gpio);
+}
+
+static int cnss_init_host_sol_gpio(struct cnss_plat_data *plat_priv)
+{
+	struct device *dev = &plat_priv->plat_dev->dev;
+	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
+	int ret = 0;
+
+	sol_gpio->host_sol_gpio = of_get_named_gpio(dev->of_node,
+						    "wlan-host-sol-gpio", 0);
+	if (sol_gpio->host_sol_gpio < 0)
+		goto out;
+
+	cnss_pr_dbg("Get host SOL GPIO (%d) from device node\n",
+		    sol_gpio->host_sol_gpio);
+
+	ret = gpio_request(sol_gpio->host_sol_gpio, "wlan_host_sol_gpio");
+	if (ret) {
+		cnss_pr_err("Failed to request host SOL GPIO, err = %d\n",
+			    ret);
+		goto out;
+	}
+
+	gpio_direction_output(sol_gpio->host_sol_gpio, 0);
+
+	return 0;
+
+out:
+	return ret;
+}
+
+static void cnss_deinit_host_sol_gpio(struct cnss_plat_data *plat_priv)
+{
+	struct cnss_sol_gpio *sol_gpio = &plat_priv->sol_gpio;
+
+	if (sol_gpio->host_sol_gpio < 0)
+		return;
+
+	gpio_free(sol_gpio->host_sol_gpio);
+}
+
+static int cnss_init_sol_gpio(struct cnss_plat_data *plat_priv)
+{
+	int ret;
+
+	ret = cnss_init_dev_sol_gpio(plat_priv);
+	if (ret)
+		goto out;
+
+	ret = cnss_init_host_sol_gpio(plat_priv);
+	if (ret)
+		goto deinit_dev_sol;
+
+	return 0;
+
+deinit_dev_sol:
+	cnss_deinit_dev_sol_gpio(plat_priv);
+out:
+	return ret;
+}
+
+static void cnss_deinit_sol_gpio(struct cnss_plat_data *plat_priv)
+{
+	cnss_deinit_host_sol_gpio(plat_priv);
+	cnss_deinit_dev_sol_gpio(plat_priv);
+}
+
 #if IS_ENABLED(CONFIG_MSM_SUBSYSTEM_RESTART)
 static int cnss_subsys_powerup(const struct subsys_desc *subsys_desc)
 {
@@ -1700,7 +1914,7 @@ EXPORT_SYMBOL(cnss_qmi_send);
 static int cnss_cold_boot_cal_start_hdlr(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
-	u32 retry = 0;
+	u32 retry = 0, timeout;
 
 	if (test_bit(CNSS_COLD_BOOT_CAL_DONE, &plat_priv->driver_state)) {
 		cnss_pr_dbg("Calibration complete. Ignore calibration req\n");
@@ -1732,6 +1946,15 @@ static int cnss_cold_boot_cal_start_hdlr(struct cnss_plat_data *plat_priv)
 	}
 
 	set_bit(CNSS_IN_COLD_BOOT_CAL, &plat_priv->driver_state);
+	if (test_bit(CNSS_DRIVER_REGISTER, &plat_priv->driver_state)) {
+		timeout = cnss_get_timeout(plat_priv,
+					   CNSS_TIMEOUT_CALIBRATION);
+		cnss_pr_dbg("Restarting calibration %ds timeout\n",
+			    timeout / 1000);
+		if (cancel_delayed_work_sync(&plat_priv->wlan_reg_driver_work))
+			schedule_delayed_work(&plat_priv->wlan_reg_driver_work,
+					      msecs_to_jiffies(timeout));
+	}
 	reinit_completion(&plat_priv->cal_complete);
 	ret = cnss_bus_dev_powerup(plat_priv);
 mark_cal_fail:
@@ -1785,12 +2008,13 @@ static int cnss_cold_boot_cal_done_hdlr(struct cnss_plat_data *plat_priv,
 
 	if (cal_info->cal_status == CNSS_CAL_DONE) {
 		cnss_cal_mem_upload_to_file(plat_priv);
-		if (cancel_delayed_work_sync(&plat_priv->wlan_reg_driver_work)
-		   ) {
-			cnss_pr_dbg("Schedule WLAN driver load\n");
+		if (!test_bit(CNSS_DRIVER_REGISTER, &plat_priv->driver_state))
+			goto out;
+
+		cnss_pr_dbg("Schedule WLAN driver load\n");
+		if (cancel_delayed_work_sync(&plat_priv->wlan_reg_driver_work))
 			schedule_delayed_work(&plat_priv->wlan_reg_driver_work,
 					      0);
-		}
 	}
 out:
 	kfree(data);
@@ -2535,7 +2759,7 @@ int cnss_register_ramdump(struct cnss_plat_data *plat_priv)
 	case QCA6290_DEVICE_ID:
 	case QCA6390_DEVICE_ID:
 	case QCA6490_DEVICE_ID:
-	case WCN7850_DEVICE_ID:
+	case KIWI_DEVICE_ID:
 		ret = cnss_register_ramdump_v2(plat_priv);
 		break;
 	default:
@@ -2555,7 +2779,7 @@ void cnss_unregister_ramdump(struct cnss_plat_data *plat_priv)
 	case QCA6290_DEVICE_ID:
 	case QCA6390_DEVICE_ID:
 	case QCA6490_DEVICE_ID:
-	case WCN7850_DEVICE_ID:
+	case KIWI_DEVICE_ID:
 		cnss_unregister_ramdump_v2(plat_priv);
 		break;
 	default:
@@ -2861,6 +3085,37 @@ static ssize_t enable_hds_store(struct device *dev,
 	return count;
 }
 
+static ssize_t time_sync_period_show(struct device *dev,
+				     struct device_attribute *attr,
+				     char *buf)
+{
+	struct cnss_plat_data *plat_priv = dev_get_drvdata(dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%u ms\n",
+			plat_priv->ctrl_params.time_sync_period);
+}
+
+static ssize_t time_sync_period_store(struct device *dev,
+				      struct device_attribute *attr,
+				      const char *buf, size_t count)
+{
+	struct cnss_plat_data *plat_priv = dev_get_drvdata(dev);
+	unsigned int time_sync_period = 0;
+
+	if (!plat_priv)
+		return -ENODEV;
+
+	if (sscanf(buf, "%du", &time_sync_period) != 1) {
+		cnss_pr_err("Invalid time sync sysfs command\n");
+		return -EINVAL;
+	}
+
+	if (time_sync_period >= CNSS_MIN_TIME_SYNC_PERIOD)
+		cnss_bus_update_time_sync_period(plat_priv, time_sync_period);
+
+	return count;
+}
+
 static ssize_t recovery_store(struct device *dev,
 			      struct device_attribute *attr,
 			      const char *buf, size_t count)
@@ -2932,7 +3187,7 @@ static ssize_t fs_ready_store(struct device *dev,
 	case QCA6290_DEVICE_ID:
 	case QCA6390_DEVICE_ID:
 	case QCA6490_DEVICE_ID:
-	case WCN7850_DEVICE_ID:
+	case KIWI_DEVICE_ID:
 		break;
 	default:
 		cnss_pr_err("Not supported for device ID 0x%lx\n",
@@ -2940,11 +3195,10 @@ static ssize_t fs_ready_store(struct device *dev,
 		return count;
 	}
 
-	if (fs_ready == FILE_SYSTEM_READY && plat_priv->cbc_enabled) {
+	if (fs_ready == FILE_SYSTEM_READY && plat_priv->cbc_enabled)
 		cnss_driver_event_post(plat_priv,
 				       CNSS_DRIVER_EVENT_COLD_BOOT_CAL_START,
 				       0, NULL);
-	}
 
 	return count;
 }
@@ -3001,6 +3255,21 @@ static ssize_t hw_trace_override_store(struct device *dev,
 	return count;
 }
 
+static ssize_t charger_mode_store(struct device *dev,
+				  struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	struct cnss_plat_data *plat_priv = dev_get_drvdata(dev);
+	int tmp = 0;
+
+	if (sscanf(buf, "%du", &tmp) != 1)
+		return -EINVAL;
+
+	plat_priv->charger_mode = tmp;
+	cnss_pr_dbg("Received Charger Mode: %d\n", tmp);
+	return count;
+}
+
 static DEVICE_ATTR_WO(fs_ready);
 static DEVICE_ATTR_WO(shutdown);
 static DEVICE_ATTR_WO(recovery);
@@ -3009,6 +3278,8 @@ static DEVICE_ATTR_WO(qdss_trace_start);
 static DEVICE_ATTR_WO(qdss_trace_stop);
 static DEVICE_ATTR_WO(qdss_conf_download);
 static DEVICE_ATTR_WO(hw_trace_override);
+static DEVICE_ATTR_WO(charger_mode);
+static DEVICE_ATTR_RW(time_sync_period);
 
 static struct attribute *cnss_attrs[] = {
 	&dev_attr_fs_ready.attr,
@@ -3019,6 +3290,8 @@ static struct attribute *cnss_attrs[] = {
 	&dev_attr_qdss_trace_stop.attr,
 	&dev_attr_qdss_conf_download.attr,
 	&dev_attr_hw_trace_override.attr,
+	&dev_attr_charger_mode.attr,
+	&dev_attr_time_sync_period.attr,
 	NULL,
 };
 
@@ -3126,6 +3399,10 @@ static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 {
 	int ret;
 
+	ret = cnss_init_sol_gpio(plat_priv);
+	if (ret)
+		return ret;
+
 	timer_setup(&plat_priv->fw_boot_timer,
 		    cnss_bus_fw_boot_timeout_hdlr, 0);
 
@@ -3165,6 +3442,8 @@ static int cnss_misc_init(struct cnss_plat_data *plat_priv)
 		cnss_pr_err("QMI IPC connection call back register failed, err = %d\n",
 			    ret);
 
+	plat_priv->sram_dump = kcalloc(SRAM_DUMP_SIZE, 1, GFP_KERNEL);
+
 	return 0;
 }
 
@@ -3182,6 +3461,8 @@ static void cnss_misc_deinit(struct cnss_plat_data *plat_priv)
 	unregister_pm_notifier(&cnss_pm_notifier);
 	del_timer(&plat_priv->fw_boot_timer);
 	wakeup_source_unregister(plat_priv->recovery_ws);
+	cnss_deinit_sol_gpio(plat_priv);
+	kfree(plat_priv->sram_dump);
 }
 
 static void cnss_init_control_params(struct cnss_plat_data *plat_priv)
@@ -3237,7 +3518,7 @@ static const struct platform_device_id cnss_platform_id_table[] = {
 	{ .name = "qca6290", .driver_data = QCA6290_DEVICE_ID, },
 	{ .name = "qca6390", .driver_data = QCA6390_DEVICE_ID, },
 	{ .name = "qca6490", .driver_data = QCA6490_DEVICE_ID, },
-	{ .name = "wcn7850", .driver_data = WCN7850_DEVICE_ID, },
+	{ .name = "kiwi", .driver_data = KIWI_DEVICE_ID, },
 	{ },
 };
 
@@ -3255,14 +3536,13 @@ static const struct of_device_id cnss_of_match_table[] = {
 		.compatible = "qcom,cnss-qca6490",
 		.data = (void *)&cnss_platform_id_table[3]},
 	{
-		.compatible = "qcom,cnss-wcn7850",
+		.compatible = "qcom,cnss-kiwi",
 		.data = (void *)&cnss_platform_id_table[4]},
 	{ },
 };
 MODULE_DEVICE_TABLE(of, cnss_of_match_table);
 
 #ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
-//#Huitao@CONNECTIVITY.WIFI.HARDWARE.SWITCH.2877804 , add for wifi fw monitor
 static void icnss_create_fw_state_kobj(void);
 static ssize_t icnss_show_fw_ready(struct device_driver *driver, char *buf)
 {
@@ -3346,13 +3626,13 @@ static int cnss_probe(struct platform_device *plat_dev)
 
 	cnss_get_pm_domain_info(plat_priv);
 	cnss_get_wlaon_pwr_ctrl_info(plat_priv);
+	cnss_power_misc_params_init(plat_priv);
 	cnss_get_tcs_info(plat_priv);
 	cnss_get_cpr_info(plat_priv);
 	cnss_aop_mbox_init(plat_priv);
 	cnss_init_control_params(plat_priv);
 
 	#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
-	//#Huitao@CONNECTIVITY.WIFI.HARDWARE.SWITCH.2877804 , add for wifi fw monitor
 	icnss_create_fw_state_kobj();
 	#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 
@@ -3422,7 +3702,6 @@ retry:
 		cnss_pr_err("CNSS genl init failed %d\n", ret);
 
 	#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
-	//#Huitao@CONNECTIVITY.WIFI.HARDWARE.SWITCH.2877804 , add for wifi fw monitor
 	cnssprobestate = CNSS_PROBE_SUCCESS;
 	#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 
@@ -3456,7 +3735,6 @@ reset_ctx:
 	cnss_set_plat_priv(plat_dev, NULL);
 out:
 	#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
-	//#Huitao@CONNECTIVITY.WIFI.HARDWARE.SWITCH.2877804 , add for wifi fw monitor
 	cnssprobestate = CNSS_PROBE_FAIL;
 	#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 	return ret;
@@ -3501,6 +3779,20 @@ static struct platform_driver cnss_platform_driver = {
 	},
 };
 
+static bool cnss_check_compatible_node(void)
+{
+	struct device_node *dn = NULL;
+
+	for_each_matching_node(dn, cnss_of_match_table) {
+		if (of_device_is_available(dn)) {
+			cnss_allow_driver_loading = true;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 /**
  * cnss_is_valid_dt_node_found - Check if valid device tree node present
  *
@@ -3513,7 +3805,7 @@ static bool cnss_is_valid_dt_node_found(void)
 {
 	struct device_node *dn = NULL;
 
-	for_each_matching_node(dn, cnss_of_match_table) {
+	for_each_node_with_property(dn, "qcom,wlan") {
 		if (of_device_is_available(dn))
 			break;
 	}
@@ -3525,7 +3817,6 @@ static bool cnss_is_valid_dt_node_found(void)
 }
 
 #ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
-//#Huitao@CONNECTIVITY.WIFI.HARDWARE.SWITCH.2877804 , add for wifi fw monitor
 static void icnss_create_fw_state_kobj(void) {
 	if (driver_create_file(&(cnss_platform_driver.driver), &fw_ready_attr)) {
 		cnss_pr_info("failed to create %s", fw_ready_attr.attr.name);
@@ -3539,6 +3830,9 @@ static int __init cnss_initialize(void)
 
 	if (!cnss_is_valid_dt_node_found())
 		return -ENODEV;
+
+	if (!cnss_check_compatible_node())
+		return ret;
 
 	cnss_debug_init();
 	ret = platform_driver_register(&cnss_platform_driver);

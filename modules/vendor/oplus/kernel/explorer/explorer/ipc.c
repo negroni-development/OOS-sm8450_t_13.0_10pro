@@ -33,9 +33,14 @@
 #include "include/rtt_debug.h"
 #include "include/ap_boot.h"
 #include "include/exception.h"
+#ifdef SLT_ENABLE
+#include "../slt/include/slt.h"
+#endif
 
 #ifndef ZEKU_EXPLORER_PLATFORM_RPI
+#ifndef OPLUS_EXPLORER_NO_PROJECT
 #include <soc/oplus/system/oplus_project.h>
+#endif
 #endif
 
 DECLARE_WAIT_QUEUE_HEAD(comm_sync_wq);
@@ -52,14 +57,16 @@ static const char *const comm_cmd_spec[] = {
 	[HAL_CMD_MAX]			"max cmd",
 };
 
+#ifndef OPLUS_EXPLORER_NO_PROJECT
 u32 explorer_get_project(void)
 {
 #ifndef ZEKU_EXPLORER_PLATFORM_RPI
-        return get_project();
+	return get_project();
 #else
 	return 0;
 #endif
 }
+#endif
 
 int explorer_send_project_id(struct explorer_plat_data *epd)
 {
@@ -228,6 +235,9 @@ static int (*ipcmem_cmd_ops[])(struct explorer_plat_data *epd,
 	[HAL_CMD_SEC]			explorer_proc_gen_msg,
 	[HAL_CMD_ISP]			explorer_proc_isp_msg,
 	[HAL_CMD_CAMERA]			explorer_proc_isp_msg,
+#ifdef SLT_ENABLE
+	[HAL_CMD_SLT]			explorer_proc_slt_msg,
+#endif
 	[HAL_CMD_GDB]			explorer_proc_gen_msg,
 	[HAL_CMD_MAX]			NULL,
 };
@@ -600,6 +610,9 @@ static int (*explorer_cmd_ops[])(struct explorer_plat_data *epd,
 	[HAL_CMD_RAM_DUMP]		explorer_proc_ramdump_msg,
 	[HAL_CMD_HCLK]			explorer_proc_hclk_msg,
 	[HAL_CMD_SDCLK]			explorer_proc_sdclk_msg,
+#ifdef SLT_ENABLE
+	[HAL_CMD_SLT]			explorer_proc_ipcmem_msg,
+#endif
 	[HAL_CMD_SUSPEND_RESUME]	explorer_proc_power_msg,
 	[HAL_CMD_UPLOAD_BUFFER]		explorer_proc_logdump_msg,
 	[HAL_CMD_GDB]			explorer_proc_ipcmem_msg,
@@ -820,7 +833,7 @@ int explorer_init_ipc(struct explorer_plat_data *epd)
 	spin_lock_init(&epd->ipc_page_slock);
 
 	/* init mbox msg workqueue */
-	epd->mbox_msg_wq = alloc_workqueue("mbox_wq", WQ_UNBOUND | WQ_HIGHPRI, 0);
+	epd->mbox_msg_wq = alloc_workqueue("mbox_wq", WQ_HIGHPRI, 0);
 	if(epd->mbox_msg_wq == NULL) {
 		pr_err("%s, create mbox workqueue failed.\n", __func__);
 		goto out;
@@ -1557,12 +1570,9 @@ static int explorer_check_wait_condition(struct explorer_plat_data *epd, u32 ipc
 	int rindex = atomic_read(&epd->mbox_rindex[mod_id]);
 
         if ((sindex & CMD_INDEX_MASK) == rindex)
-		return 1;
-        else {
-		pr_err("%s, failed, mod_id=0x%x, sindex=%d, rindex=%d",
-		       __func__, mod_id, sindex, rindex);
-		return 0;
-	}
+                return 1;
+        else
+                return 0;
 }
 
 /*
@@ -2562,6 +2572,9 @@ int explorer_genl_mcast_data(struct explorer_plat_data *epd, u32 id, void *ap_bu
 	u32 size_mod = size % GENL_PAYLOAD_FRAME_MAX_LENGTH;
 	u32 size_quot = size / GENL_PAYLOAD_FRAME_MAX_LENGTH;
 	struct ipc_genl_header genl_header;
+#ifdef SLT_ENABLE
+	struct slt_resp_msg *slt_resp = (struct slt_resp_msg *)ap_buffer;
+#endif
 
 	if (!ap_buffer || (size > GENL_PAYLOAD_TOTAL_MAX_LENGTH)) {
 		pr_err("%s, invalid argument.\n", __func__);
@@ -2569,7 +2582,12 @@ int explorer_genl_mcast_data(struct explorer_plat_data *epd, u32 id, void *ap_bu
 	}
 
 	pr_debug("%s, begin, id = 0x%x.\n", __func__, id);
-
+#ifdef SLT_ENABLE
+	if (id == HAL_CMD_SLT) {
+		pr_info("SLT_TEST_CASE: case id: %d, deltaTime: %d(ms)", slt_resp->testcase_id,
+			jiffies_to_msecs(jiffies - epd->ebs.start_jiffies));
+	}
+#endif
 	mutex_lock(&epd->genl_lock);
 	genl_header.id = id;
 	genl_header.size = size;

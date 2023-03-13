@@ -1905,7 +1905,9 @@ static void wcd_mbhc_plug_fix_after_ssr(struct wcd_mbhc *mbhc)
 #endif /* OPLUS_ARCH_EXTENDS */
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
-#define WCD_CHECK_PLUG_IRQ_DELAY    2000//ms
+#define WCD_CHECK_PLUG_IN_IRQ_DELAY    5000//ms
+#define WCD_CHECK_PLUG_OUT_IRQ_DELAY    2000//ms
+
 static void wcd_check_plug_irq_fn(struct work_struct *work)
 {
 	struct delayed_work *dwork;
@@ -1973,8 +1975,13 @@ static int wcd_mbhc_usbc_ana_event_handler(struct notifier_block *nb,
 	#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
 	if (mbhc->mbhc_cfg && mbhc->hp_wake_lock) {
 		cancel_delayed_work_sync(&mbhc->hp_irq_chk_work);
-		__pm_wakeup_event(mbhc->hp_wake_lock, msecs_to_jiffies(WCD_CHECK_PLUG_IRQ_DELAY + 10));
-		schedule_delayed_work(&mbhc->hp_irq_chk_work, msecs_to_jiffies(WCD_CHECK_PLUG_IRQ_DELAY));
+		if (mode == TYPEC_ACCESSORY_AUDIO) {
+			__pm_wakeup_event(mbhc->hp_wake_lock, msecs_to_jiffies(WCD_CHECK_PLUG_IN_IRQ_DELAY + 10));
+			schedule_delayed_work(&mbhc->hp_irq_chk_work, msecs_to_jiffies(WCD_CHECK_PLUG_IN_IRQ_DELAY));
+		} else if (mbhc->usbc_mode == TYPEC_ACCESSORY_NONE) {
+			__pm_wakeup_event(mbhc->hp_wake_lock, msecs_to_jiffies(WCD_CHECK_PLUG_OUT_IRQ_DELAY + 10));
+			schedule_delayed_work(&mbhc->hp_irq_chk_work, msecs_to_jiffies(WCD_CHECK_PLUG_OUT_IRQ_DELAY));
+		}
 	}
 	#endif /* OPLUS_FEATURE_MM_FEEDBACK */
 

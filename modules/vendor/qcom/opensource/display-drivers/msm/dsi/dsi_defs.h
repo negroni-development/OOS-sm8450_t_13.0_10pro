@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
+ * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -49,6 +50,7 @@
  * @DSI_PIXEL_FORMAT_RGB111:
  * @DSI_PIXEL_FORMAT_RGB332:
  * @DSI_PIXEL_FORMAT_RGB444:
+ * @DSI_PIXEL_FORMAT_RGB101010:
  * @DSI_PIXEL_FORMAT_MAX:
  */
 enum dsi_pixel_format {
@@ -59,6 +61,7 @@ enum dsi_pixel_format {
 	DSI_PIXEL_FORMAT_RGB111,
 	DSI_PIXEL_FORMAT_RGB332,
 	DSI_PIXEL_FORMAT_RGB444,
+	DSI_PIXEL_FORMAT_RGB101010,
 	DSI_PIXEL_FORMAT_MAX
 };
 
@@ -303,23 +306,22 @@ enum dsi_cmd_set_type {
 	DSI_CMD_SET_POST_TIMING_SWITCH,
 	DSI_CMD_SET_QSYNC_ON,
 	DSI_CMD_SET_QSYNC_OFF,
-#ifdef OPLUS_BUG_STABILITY
-	DSI_CMD_POST_ON_BACKLIGHT,
-	DSI_CMD_AOD_ON,
-	DSI_CMD_AOD_OFF,
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
 	DSI_CMD_HBM_ON,
 	DSI_CMD_HBM_OFF,
-	DSI_CMD_AOD_HBM_ON,
-	DSI_CMD_AOD_HBM_OFF,
+	DSI_CMD_AOD_HIGH_LIGHT_MODE,
+	DSI_CMD_AOD_LOW_LIGHT_MODE,
+	DSI_CMD_ULTRA_LOW_POWER_AOD_ON,
+	DSI_CMD_ULTRA_LOW_POWER_AOD_OFF,
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
+#ifdef OPLUS_BUG_STABILITY
+	DSI_CMD_POST_ON_BACKLIGHT,
 	DSI_CMD_SEED_MODE0,
 	DSI_CMD_SEED_MODE1,
 	DSI_CMD_SEED_MODE2,
 	DSI_CMD_SEED_MODE3,
 	DSI_CMD_SEED_MODE4,
 	DSI_CMD_SEED_OFF,
-	DSI_CMD_NORMAL_HBM_ON,
-	DSI_CMD_AOD_HIGH_LIGHT_MODE,
-	DSI_CMD_AOD_LOW_LIGHT_MODE,
 	DSI_CMD_SPR_MODE0,
 	DSI_CMD_SPR_MODE1,
 	DSI_CMD_SPR_MODE2,
@@ -335,7 +337,6 @@ enum dsi_cmd_set_type {
 	DSI_CMD_LOADING_EFFECT_OFF,
 	DSI_CMD_HBM_ENTER_SWITCH,
 	DSI_CMD_HBM_EXIT_SWITCH,
-	DSI_CMD_HBM_AOR_RESTORE,
 #endif
 #if defined(OPLUS_FEATURE_PXLW_IRIS5)
 	DSI_CMD_SET_ABYP,
@@ -480,6 +481,7 @@ struct dsi_panel_cmd_set {
  * @mdp_transfer_time_us:   Specifies the mdp transfer time for command mode
  *                    panels in microseconds.
  * @dsi_transfer_time_us:   Specifies dsi transfer time for command mode.
+ * @fsc_mode:         Panel FSC (Field sequential coloring) Mode status.
  * @dsc_enabled:      DSC compression enabled.
  * @vdc_enabled:      VDC compression enabled.
  * @dsc:              DSC compression configuration.
@@ -507,6 +509,7 @@ struct dsi_mode_info {
 	u64 min_dsi_clk_hz;
 	u32 mdp_transfer_time_us;
 	u32 dsi_transfer_time_us;
+	bool fsc_mode;
 	bool dsc_enabled;
 	bool vdc_enabled;
 	struct msm_display_dsc_info *dsc;
@@ -743,6 +746,10 @@ struct dsi_display_mode_priv_info {
 	u32 vsync_width;
 	u32 vsync_period;
 #endif /* OPLUS_BUG_STABILITY */
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	bool oplus_ofp_need_to_separate_backlight;
+	unsigned int oplus_ofp_hbm_on_period;
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 };
 
 /**
@@ -862,6 +869,8 @@ static inline int dsi_pixel_format_to_bpp(enum dsi_pixel_format fmt)
 		return 8;
 	case DSI_PIXEL_FORMAT_RGB444:
 		return 12;
+	case DSI_PIXEL_FORMAT_RGB101010:
+		return 30;
 	}
 	return 24;
 }

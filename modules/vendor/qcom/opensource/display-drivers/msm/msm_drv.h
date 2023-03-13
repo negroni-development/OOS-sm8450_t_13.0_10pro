@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
@@ -135,9 +136,6 @@ enum msm_mdp_plane_property {
 	PLANE_PROP_PREFILL_TIME,
 	PLANE_PROP_SCALER_V1,
 	PLANE_PROP_SCALER_V2,
-#ifdef OPLUS_BUG_STABILITY
-	PLANE_PROP_CUSTOM,
-#endif /* OPLUS_BUG_STABILITY */
 	PLANE_PROP_INVERSE_PMA,
 	PLANE_PROP_FP16_IGC,
 	PLANE_PROP_FP16_UNMULT,
@@ -148,6 +146,7 @@ enum msm_mdp_plane_property {
 	PLANE_PROP_SRC_CONFIG,
 	PLANE_PROP_FB_TRANSLATION_MODE,
 	PLANE_PROP_MULTIRECT_MODE,
+	PLANE_PROP_SYS_CACHE_TYPE,
 
 	/* total # of properties */
 	PLANE_PROP_COUNT
@@ -179,7 +178,6 @@ enum msm_mdp_crtc_property {
 	CRTC_PROP_ROT_CLK,
 	CRTC_PROP_ROI_V1,
 	CRTC_PROP_SECURITY_LEVEL,
-	CRTC_PROP_IDLE_TIMEOUT,
 	CRTC_PROP_DEST_SCALER,
 #ifdef OPLUS_BUG_STABILITY
 	CRTC_PROP_CUSTOM,
@@ -222,9 +220,6 @@ enum msm_mdp_conn_property {
 	CONNECTOR_PROP_ROI_V1,
 	CONNECTOR_PROP_BL_SCALE,
 	CONNECTOR_PROP_SV_BL_SCALE,
-#ifdef OPLUS_BUG_STABILITY
-	CONNECTOR_PROP_CUSTOM,
-#endif
 	CONNECTOR_PROP_SUPPORTED_COLORSPACES,
 	CONNECTOR_PROP_DYN_BIT_CLK,
 	CONNECTOR_PROP_DIMMING_CTRL,
@@ -245,6 +240,14 @@ enum msm_mdp_conn_property {
 #ifdef OPLUS_BUG_STABILITY
 	CONNECTOR_PROP_QSYNC_MIN_FPS,
 #endif
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	CONNECTOR_PROP_HBM_ENABLE,
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
+
+#ifdef OPLUS_BUG_STABILITY
+	// Prop to store sync panel backlight level
+	CONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL,
+#endif /* OPLUS_BUG_STABILITY */
 
 	/* total # of properties */
 	CONNECTOR_PROP_COUNT
@@ -1090,6 +1093,8 @@ void __msm_fence_worker(struct work_struct *work);
 struct drm_atomic_state *msm_atomic_state_alloc(struct drm_device *dev);
 void msm_atomic_state_clear(struct drm_atomic_state *state);
 void msm_atomic_state_free(struct drm_atomic_state *state);
+
+void msm_atomic_flush_display_threads(struct msm_drm_private *priv);
 
 int msm_gem_init_vma(struct msm_gem_address_space *aspace,
 		struct msm_gem_vma *vma, int npages);

@@ -12,6 +12,16 @@
 #include "dsi-panel-sharp-qsync-fhd-60hz-cmd.dtsi"
 #include <dt-bindings/clock/mdss-10nm-pll-clk.h>
 
+//#ifdef OPLUS_FEATURE_DISPLAY
+&soc {
+	oplus_display_dev: oplus,dsi-display-dev {
+		oplus,dsi-panel-primary = <>;
+		oplus,dsi-panel-secondary = <>;
+		oplus,dsi-panel-extended = <>;
+	};
+};
+//#endif /* OPLUS_FEATURE_DISPLAY */
+
 &soc {
 	dsi_panel_pwr_supply: dsi_panel_pwr_supply {
 		#address-cells = <1>;

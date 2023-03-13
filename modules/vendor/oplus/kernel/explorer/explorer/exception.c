@@ -261,11 +261,13 @@ int explorer_spec_exception_handler(struct explorer_plat_data *epd, struct excep
 
 	if(func) {
 		ret = func(epd, info);
-		EXCEPTION_LOG_I("find spec func ret=%d\n", ret);
+		EXCEPTION_LOG_I("find spec func\n");
 	} else {
 		ret = -EINVAL;
 		EXCEPTION_LOG_I("no spec func\n");
 	}
+
+	EXCEPTION_LOG_I("ret=%d done.\n", ret);
 
 	return ret;
 }

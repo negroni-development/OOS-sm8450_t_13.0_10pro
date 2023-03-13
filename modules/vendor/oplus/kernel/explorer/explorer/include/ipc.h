@@ -260,7 +260,9 @@ int explorer_genetlink_init(struct explorer_plat_data *epd);
 int explorer_genetlink_exit(struct explorer_plat_data *epd);
 int explorer_genl_mcast_data(struct explorer_plat_data *epd, u32 id, void *ap_buffer, u32 size);
 int explorer_execute_tuning(struct explorer_plat_data *explorer_data);
+#ifndef ZEKU_EXPLORER_PLATFORM_RPI
 u32 explorer_get_project(void);
+#endif
 int explorer_send_project_id(struct explorer_plat_data *epd);
 int explorer_write_project_id(struct explorer_plat_data *epd);
 

@@ -2,7 +2,7 @@
  * Sigma Control API DUT (station/AP)
  * Copyright (c) 2010-2011, Atheros Communications, Inc.
  * Copyright (c) 2011-2017, Qualcomm Atheros, Inc.
- * Copyright (c) 2018-2019, The Linux Foundation
+ * Copyright (c) 2018-2021, The Linux Foundation
  * All Rights Reserved.
  * Licensed under the Clear BSD license. See README for more details.
  */
@@ -123,6 +123,8 @@ struct dut_hw_modes {
 	u8 ampdu_params;
 	u32 vht_capab;
 	u8 vht_mcs_set[8];
+	u8 ap_he_phy_capab[11];
+	bool valid;
 };
 
 #define WPA_GET_BE32(a) ((((u32) (a)[0]) << 24) | (((u32) (a)[1]) << 16) | \
@@ -391,6 +393,7 @@ struct dscp_policy_data {
 	int end_port;
 	enum ip_protocol protocol;
 	int dscp;
+	int granularity_score;
 	struct dscp_policy_data *next;
 };
 
@@ -545,7 +548,7 @@ struct sigma_dut {
 	} ap_chwidth;
 	enum ap_chwidth default_11na_ap_chwidth;
 	enum ap_chwidth default_11ng_ap_chwidth;
-	int ap_tx_stbc;
+	enum value_not_set_enabled_disabled ap_tx_stbc;
 	enum value_not_set_enabled_disabled ap_dyn_bw_sig;
 	int ap_sgi80;
 	int ap_p2p_mgmt;
@@ -890,6 +893,7 @@ struct sigma_dut {
 		PROGRAM_HE,
 		PROGRAM_HS2_R3,
 		PROGRAM_QM,
+		PROGRAM_HS2_R4,
 	} program;
 
 	enum device_type {
@@ -1035,6 +1039,9 @@ struct sigma_dut {
 	int dscp_reject_resp_code;
 	struct dscp_policy_status dscp_status[5];
 	unsigned int num_dscp_status;
+	unsigned int prev_disable_scs_support;
+	unsigned int prev_disable_mscs_support;
+	int dscp_use_iptables;
 };
 
 
@@ -1149,6 +1156,7 @@ enum sigma_cmd_result cmd_ap_config_commit(struct sigma_dut *dut,
 int ap_wps_registration(struct sigma_dut *dut, struct sigma_conn *conn,
 			struct sigma_cmd *cmd);
 const char * get_hostapd_ifname(struct sigma_dut *dut);
+void get_wiphy_capabilities(struct sigma_dut *dut);
 
 /* sta.c */
 void sta_register_cmds(void);
@@ -1175,6 +1183,7 @@ int sta_extract_60g_ese(struct sigma_dut *dut, struct sigma_cmd *cmd,
 int wil6210_set_force_mcs(struct sigma_dut *dut, int force, int mcs);
 int sta_set_addba_buf_size(struct sigma_dut *dut,
 			   const char *intf, int bufsize);
+int wcn_set_he_gi(struct sigma_dut *dut, const char *intf, u8 gi_val);
 #ifdef NL80211_SUPPORT
 int wcn_set_he_ltf(struct sigma_dut *dut, const char *intf,
 		   enum qca_wlan_he_ltf_cfg ltf);
@@ -1275,6 +1284,8 @@ void hlp_thread_cleanup(struct sigma_dut *dut);
 #ifdef NL80211_SUPPORT
 struct nl80211_ctx * nl80211_init(struct sigma_dut *dut);
 void nl80211_deinit(struct sigma_dut *dut, struct nl80211_ctx *ctx);
+int nl80211_open_event_sock(struct sigma_dut *dut);
+void nl80211_close_event_sock(struct sigma_dut *dut);
 struct nl_msg * nl80211_drv_msg(struct sigma_dut *dut, struct nl80211_ctx *ctx,
 				int ifindex, int flags,
 				uint8_t cmd);
@@ -1300,5 +1311,6 @@ void server_register_cmds(void);
 void miracast_register_cmds(void);
 int set_ipv6_addr(struct sigma_dut *dut, const char *ip, const char *mask,
 		  const char *ifname);
+void kill_pid(struct sigma_dut *dut, const char *pid_file);
 
 #endif /* SIGMA_DUT_H */

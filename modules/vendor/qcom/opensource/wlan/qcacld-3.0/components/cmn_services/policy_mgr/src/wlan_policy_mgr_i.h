@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -240,6 +241,8 @@ extern enum policy_mgr_conc_next_action
  * @is_force_1x1_enable: Is 1x1 forced for connection
  * @sta_sap_scc_on_dfs_chnl: STA-SAP SCC on DFS channel
  * @sta_sap_scc_on_lte_coex_chnl: STA-SAP SCC on LTE Co-ex channel
+ * @sta_sap_scc_on_indoor_channel: Allow STA-SAP scc on indoor only
+ * channels
  * @nan_sap_scc_on_lte_coex_chnl: NAN-SAP SCC on LTE Co-ex channel
  * @sap_mandatory_chnl_enable: To enable/disable SAP mandatory channels
  * @mark_indoor_chnl_disable: Mark indoor channel as disable or enable
@@ -264,6 +267,7 @@ struct policy_mgr_cfg {
 	enum force_1x1_type is_force_1x1_enable;
 	uint8_t sta_sap_scc_on_dfs_chnl;
 	uint8_t sta_sap_scc_on_lte_coex_chnl;
+	bool sta_sap_scc_on_indoor_channel;
 	uint8_t nan_sap_scc_on_lte_coex_chnl;
 	uint8_t sap_mandatory_chnl_enable;
 	uint8_t mark_indoor_chnl_disable;
@@ -304,6 +308,8 @@ struct policy_mgr_cfg {
  *                        regulatory/other considerations
  * @sap_mandatory_channels_len: Length of the SAP mandatory
  *                            channel list
+ * @do_sap_unsafe_ch_check: whether need check sap unsafe channel
+ * @last_disconn_sta_freq: last disconnected sta channel freq
  * @concurrency_mode: active concurrency combination
  * @no_of_open_sessions: Number of active vdevs
  * @no_of_active_sessions: Number of active connections
@@ -347,6 +353,7 @@ struct policy_mgr_psoc_priv_obj {
 	uint32_t sap_mandatory_channels[NUM_CHANNELS];
 	uint32_t sap_mandatory_channels_len;
 	bool do_sap_unsafe_ch_check;
+	qdf_freq_t last_disconn_sta_freq;
 	uint32_t concurrency_mode;
 	uint8_t no_of_open_sessions[QDF_MAX_NO_OF_MODE];
 	uint8_t no_of_active_sessions[QDF_MAX_NO_OF_MODE];
@@ -388,6 +395,25 @@ struct policy_mgr_mac_ss_bw_info {
 	uint32_t mac_bw;
 	uint32_t mac_band_cap;
 };
+
+#ifdef WLAN_FEATURE_11BE_MLO
+/**
+ * union conc_ext_flag - extended flags for concurrency check
+ *
+ * @mlo: the new connection is MLO
+ * @mlo_link_assoc_connected: the new connection is secondary MLO link and
+ *  the corresponding assoc link is connected
+ * @value: uint32 value for extended flags
+ */
+union conc_ext_flag {
+	struct {
+		uint32_t mlo: 1;
+		uint32_t mlo_link_assoc_connected: 1;
+	};
+
+	uint32_t value;
+};
+#endif
 
 struct policy_mgr_psoc_priv_obj *policy_mgr_get_context(
 		struct wlan_objmgr_psoc *psoc);
@@ -731,6 +757,17 @@ void
 policy_mgr_dump_freq_range(struct policy_mgr_psoc_priv_obj *pm_ctx);
 
 /**
+ * policy_mgr_dump_sbs_freq_range() - Function to print SBS frequency range
+ * for both MAC 0 and MAC1
+ *
+ * @pm_ctx: Policy Mgr context
+ *
+ * Return: void
+ */
+void
+policy_mgr_dump_sbs_freq_range(struct policy_mgr_psoc_priv_obj *pm_ctx);
+
+/**
  * policy_mgr_dump_curr_freq_range() - Function to print current frequency range
  * for both MAC 0 and MAC1
  *
@@ -792,6 +829,7 @@ QDF_STATUS policy_mgr_nss_update(struct wlan_objmgr_psoc *psoc,
  * @mode: new connection mode
  * @ch_freq: channel frequency on which new connection is coming up
  * @bw: Bandwidth requested by the connection (optional)
+ * @ext_flags: extended flags for concurrency check (union conc_ext_flag)
  *
  * When a new connection is about to come up check if current
  * concurrency combination including the new connection is
@@ -803,5 +841,6 @@ QDF_STATUS policy_mgr_nss_update(struct wlan_objmgr_psoc *psoc,
 bool policy_mgr_is_concurrency_allowed(struct wlan_objmgr_psoc *psoc,
 				       enum policy_mgr_con_mode mode,
 				       uint32_t ch_freq,
-				       enum hw_mode_bandwidth bw);
+				       enum hw_mode_bandwidth bw,
+				       uint32_t ext_flags);
 #endif

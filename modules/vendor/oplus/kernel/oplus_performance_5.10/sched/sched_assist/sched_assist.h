@@ -12,7 +12,6 @@
 #include <trace/hooks/rwsem.h>
 #include <trace/hooks/topology.h>
 #include <trace/hooks/binder.h>
-#include <trace/hooks/workqueue.h>
 #include <trace/events/task.h>
 
 #define REGISTER_TRACE_VH(vender_hook, handler) \
@@ -38,7 +37,4 @@
 #define UNREGISTER_TRACE_RVH(vender_hook, handler)
 #endif
 
-
-
-
-#endif
+#endif /* _OPLUS_SCHED_ASSIST_H_ */

@@ -16,16 +16,15 @@
 
 #define OPLUS_SCHEDULER_PROC_DIR		"oplus_scheduler"
 #define OPLUS_SCHEDASSIST_PROC_DIR		"sched_assist"
-#define OPLUS_SLIDEBOOST_PROC_DIR		"slide_boost"
 
 #define MAX_SET (128)
 #define MAX_THREAD_INPUT (6)
 #define TPD_HASH_BITS (6)
 
-int global_debug_enabled = 0;
-int global_sched_assist_enabled = 0;
-int global_sched_assist_scene = 0;
+int global_debug_enabled;
+int global_sched_assist_enabled;
 EXPORT_SYMBOL(global_sched_assist_enabled);
+int global_sched_assist_scene;
 EXPORT_SYMBOL(global_sched_assist_scene);
 
 pid_t global_ux_task_pid = -1;
@@ -35,9 +34,8 @@ pid_t save_audio_tgid;
 pid_t save_top_app_tgid;
 unsigned int top_app_type;
 
-struct proc_dir_entry *d_oplus_scheduler = NULL;
-struct proc_dir_entry *d_sched_assist = NULL;
-struct proc_dir_entry *d_slide_boost = NULL;
+struct proc_dir_entry *d_oplus_scheduler;
+struct proc_dir_entry *d_sched_assist;
 
 enum {
 	OPT_STR_TYPE = 0,
@@ -64,21 +62,21 @@ static ssize_t proc_debug_enabled_write(struct file *file, const char __user *bu
 
 	if (count > sizeof(buffer) - 1)
 		count = sizeof(buffer) - 1;
-	if (copy_from_user(buffer, buf, count)) {
-		return -EFAULT;
-	}
 
-	err = kstrtoint(strstrip(buffer), 0, &val);
-	if (err) {
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+	err = kstrtoint(strstrip(buffer), 10, &val);
+	if (err)
 		return err;
-	}
 
 	global_debug_enabled = val;
 
 	return count;
 }
 
-static ssize_t proc_debug_enabled_read(struct file* file, char __user *buf,
+static ssize_t proc_debug_enabled_read(struct file *file, char __user *buf,
 		size_t count, loff_t *ppos)
 {
 	char buffer[20];
@@ -99,21 +97,21 @@ static ssize_t proc_sched_assist_enabled_write(struct file *file, const char __u
 
 	if (count > sizeof(buffer) - 1)
 		count = sizeof(buffer) - 1;
-	if (copy_from_user(buffer, buf, count)) {
-		return -EFAULT;
-	}
 
-	err = kstrtoint(strstrip(buffer), 0, &val);
-	if (err) {
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+	err = kstrtoint(strstrip(buffer), 10, &val);
+	if (err)
 		return err;
-	}
 
 	global_sched_assist_enabled = val;
 
 	return count;
 }
 
-static ssize_t proc_sched_assist_enabled_read(struct file* file, char __user *buf,
+static ssize_t proc_sched_assist_enabled_read(struct file *file, char __user *buf,
 		size_t count, loff_t *ppos)
 {
 	char buffer[13];
@@ -135,14 +133,14 @@ static ssize_t proc_sched_assist_scene_write(struct file *file, const char __use
 
 	if (count > sizeof(buffer) - 1)
 		count = sizeof(buffer) - 1;
-	if (copy_from_user(buffer, buf, count)) {
-		return -EFAULT;
-	}
 
-	err = kstrtoint(strstrip(buffer), 0, &val);
-	if (err) {
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	buffer[count] = '\0';
+	err = kstrtoint(strstrip(buffer), 10, &val);
+	if (err)
 		return err;
-	}
 
 	mutex_lock(&sa_scene_mutex);
 
@@ -151,18 +149,17 @@ static ssize_t proc_sched_assist_scene_write(struct file *file, const char __use
 		goto out;
 	}
 
-	if (val & SA_SCENE_OPT_SET) {
+	if (val & SA_SCENE_OPT_SET)
 		global_sched_assist_scene |= val & (~SA_SCENE_OPT_SET);
-	} else if (val & global_sched_assist_scene) {
+	else if (val & global_sched_assist_scene)
 		global_sched_assist_scene &= ~val;
-	}
 
 out:
 	mutex_unlock(&sa_scene_mutex);
 	return count;
 }
 
-static ssize_t proc_sched_assist_scene_read(struct file* file, char __user *buf,
+static ssize_t proc_sched_assist_scene_read(struct file *file, char __user *buf,
 		size_t count, loff_t *ppos)
 {
 	char buffer[13];
@@ -186,7 +183,7 @@ static ssize_t proc_ux_task_write(struct file *file, const char __user *buf,
 {
 	char buffer[MAX_SET];
 	char *str, *token;
-	char opt_str[OPT_STR_MAX][8];
+	char opt_str[OPT_STR_MAX][8] = {"0", "0", "0"};
 	int cnt = 0;
 	int pid = 0;
 	int ux_state = 0, ux_orig = 0;
@@ -198,61 +195,61 @@ static ssize_t proc_ux_task_write(struct file *file, const char __user *buf,
 	if (count > sizeof(buffer) - 1)
 		count = sizeof(buffer) - 1;
 
-	if (copy_from_user(buffer, buf, count)) {
+	if (copy_from_user(buffer, buf, count))
 		return -EFAULT;
-	}
 
+	buffer[count] = '\0';
 	str = strstrip(buffer);
 	while ((token = strsep(&str, " ")) && *token && (cnt < OPT_STR_MAX)) {
-		strncpy(opt_str[cnt], token, sizeof(opt_str[cnt]));
+		strlcpy(opt_str[cnt], token, sizeof(opt_str[cnt]));
 		cnt += 1;
 	}
 
 	if (cnt != OPT_STR_MAX) {
-		if (cnt == (OPT_STR_MAX -1) && !strncmp(opt_str[OPT_STR_TYPE], "r", 1)) {
-			err = kstrtoint(strstrip(opt_str[OPT_STR_PID]), 0, &pid);
-			if (err) {
+		if (cnt == (OPT_STR_MAX - 1) && !strncmp(opt_str[OPT_STR_TYPE], "r", 1)) {
+			err = kstrtoint(strstrip(opt_str[OPT_STR_PID]), 10, &pid);
+			if (err)
 				return err;
-			}
 
-			if (pid > 0 && pid <= PID_MAX_DEFAULT) {
+			if (pid > 0 && pid <= PID_MAX_DEFAULT)
 				global_ux_task_pid = pid;
-			}
 		}
 
 		return -EFAULT;
 	}
 
-	err = kstrtoint(strstrip(opt_str[OPT_STR_PID]), 0, &pid);
-	if (err) {
+	err = kstrtoint(strstrip(opt_str[OPT_STR_PID]), 10, &pid);
+	if (err)
 		return err;
-	}
 
-	err = kstrtoint(strstrip(opt_str[OPT_STR_VAL]), 0, &ux_state);
-	if (err) {
+	err = kstrtoint(strstrip(opt_str[OPT_STR_VAL]), 10, &ux_state);
+	if (err)
 		return err;
-	}
 
 	mutex_lock(&sa_ux_mutex);
 	if (!strncmp(opt_str[OPT_STR_TYPE], "p", 1) && (ux_state >= 0)) {
-		struct task_struct* ux_task = NULL;
+		struct task_struct *ux_task = NULL;
 
 		if (pid > 0 && pid <= PID_MAX_DEFAULT) {
 			rcu_read_lock();
 			ux_task = find_task_by_vpid(pid);
-			if (ux_task) {
+			if (ux_task)
 				get_task_struct(ux_task);
+			rcu_read_unlock();
+
+			if (ux_task) {
 				ux_orig = oplus_get_ux_state(ux_task);
 
-				if (oplus_get_inherit_ux(ux_task))
+				if ((ux_state & SA_OPT_SET) && oplus_get_inherit_ux(ux_task)) {
+					clear_all_inherit_type(ux_task);
 					ux_orig = 0;
+				}
 
 				if (ux_state == SA_OPT_CLEAR) { /* clear all ux type but animator type */
-					if (ux_orig & SA_TYPE_ANIMATOR) {
+					if (ux_orig & SA_TYPE_ANIMATOR)
 						ux_orig &= SA_TYPE_ANIMATOR;
-					} else {
+					else
 						ux_orig = 0;
-					}
 					oplus_set_ux_state(ux_task, ux_orig);
 				} else if (ux_state & SA_OPT_SET) { /* set target ux type and clear set opt */
 					ux_orig |= ux_state & (~SA_OPT_SET);
@@ -263,8 +260,6 @@ static ssize_t proc_ux_task_write(struct file *file, const char __user *buf,
 				}
 				put_task_struct(ux_task);
 			}
-
-			rcu_read_unlock();
 		}
 	}
 
@@ -272,24 +267,23 @@ static ssize_t proc_ux_task_write(struct file *file, const char __user *buf,
 	return count;
 }
 
-static ssize_t proc_ux_task_read(struct file* file, char __user *buf,
+static ssize_t proc_ux_task_read(struct file *file, char __user *buf,
 		size_t count, loff_t *ppos)
 {
 	char buffer[256];
 	size_t len = 0;
-	struct task_struct* task = NULL;
+	struct task_struct *task = NULL;
 
 	task = find_task_by_vpid(global_ux_task_pid);
 	if (task) {
 		get_task_struct(task);
-		len = snprintf(buffer, sizeof(buffer), "comm=%s pid=%d tgid=%d ux_state=%d inherit=%llx(bi:%d rw:%d mu:%d) im_flag=%d\n",
+		len = snprintf(buffer, sizeof(buffer), "comm=%s pid=%d tgid=%d ux_state=%d inherit=%lld(bi:%d rw:%d mu:%d) im_flag=%d\n",
 			task->comm, task->pid, task->tgid, oplus_get_ux_state(task), oplus_get_inherit_ux(task),
 			test_inherit_ux(task, INHERIT_UX_BINDER), test_inherit_ux(task, INHERIT_UX_RWSEM), test_inherit_ux(task, INHERIT_UX_MUTEX),
 			oplus_get_im_flag(task));
 		put_task_struct(task);
-	} else {
+	} else
 		len = snprintf(buffer, sizeof(buffer), "Can not find task\n");
-	}
 
 	return simple_read_from_buffer(buf, count, ppos, buffer, len);
 }
@@ -316,43 +310,39 @@ static ssize_t proc_im_flag_write(struct file *file, const char __user *buf,
 	if (count > sizeof(buffer) - 1)
 		count = sizeof(buffer) - 1;
 
-	if (copy_from_user(buffer, buf, count)) {
+	if (copy_from_user(buffer, buf, count))
 		return -EFAULT;
-	}
 
+	buffer[count] = '\0';
 	str = strstrip(buffer);
 	while ((token = strsep(&str, " ")) && *token && (cnt < OPT_STR_MAX)) {
-		strncpy(opt_str[cnt], token, sizeof(opt_str[cnt]));
+		strlcpy(opt_str[cnt], token, sizeof(opt_str[cnt]));
 		cnt += 1;
 	}
 
 	if (cnt != OPT_STR_MAX) {
-		if (cnt == (OPT_STR_MAX -1) && !strncmp(opt_str[OPT_STR_TYPE], "r", 1)) {
-			err = kstrtoint(strstrip(opt_str[OPT_STR_PID]), 0, &pid);
-			if (err) {
+		if (cnt == (OPT_STR_MAX - 1) && !strncmp(opt_str[OPT_STR_TYPE], "r", 1)) {
+			err = kstrtoint(strstrip(opt_str[OPT_STR_PID]), 10, &pid);
+			if (err)
 				return err;
-			}
 
-			if (pid > 0 && pid <= PID_MAX_DEFAULT) {
+			if (pid > 0 && pid <= PID_MAX_DEFAULT)
 				global_im_flag_pid = pid;
-			}
 		}
 		return -EFAULT;
 	}
 
-	err = kstrtoint(strstrip(opt_str[OPT_STR_PID]), 0, &pid);
-	if (err) {
+	err = kstrtoint(strstrip(opt_str[OPT_STR_PID]), 10, &pid);
+	if (err)
 		return err;
-	}
 
-	err = kstrtoint(strstrip(opt_str[OPT_STR_VAL]), 0, &im_flag);
-	if (err) {
+	err = kstrtoint(strstrip(opt_str[OPT_STR_VAL]), 10, &im_flag);
+	if (err)
 		return err;
-	}
 
 	mutex_lock(&sa_im_mutex);
 	if (!strncmp(opt_str[OPT_STR_TYPE], "p", 1)) {
-		struct task_struct* task = NULL;
+		struct task_struct *task = NULL;
 
 		if (pid > 0 && pid <= PID_MAX_DEFAULT) {
 			rcu_read_lock();
@@ -361,9 +351,8 @@ static ssize_t proc_im_flag_write(struct file *file, const char __user *buf,
 				get_task_struct(task);
 				oplus_set_im_flag(task, im_flag);
 				put_task_struct(task);
-			} else {
-				printk("[sched_assist] can not find task with pid=%d", pid);
-			}
+			} else
+				ux_debug("Can not find task with pid=%d", pid);
 			rcu_read_unlock();
 		}
 	}
@@ -372,12 +361,12 @@ static ssize_t proc_im_flag_write(struct file *file, const char __user *buf,
 	return count;
 }
 
-static ssize_t proc_im_flag_read(struct file* file, char __user *buf,
+static ssize_t proc_im_flag_read(struct file *file, char __user *buf,
 		size_t count, loff_t *ppos)
 {
 	char buffer[256];
 	size_t len = 0;
-	struct task_struct* task = NULL;
+	struct task_struct *task = NULL;
 
 	task = find_task_by_vpid(global_im_flag_pid);
 	if (task) {
@@ -385,9 +374,8 @@ static ssize_t proc_im_flag_read(struct file* file, char __user *buf,
 		len = snprintf(buffer, sizeof(buffer), "comm=%s pid=%d tgid=%d im_flag=%d\n",
 			task->comm, task->pid, task->tgid, oplus_get_im_flag(task));
 		put_task_struct(task);
-	} else {
+	} else
 		len = snprintf(buffer, sizeof(buffer), "Can not find task\n");
-	}
 
 	return simple_read_from_buffer(buf, count, ppos, buffer, len);
 }
@@ -417,9 +405,10 @@ static ssize_t proc_sched_impt_task_write(struct file *file, const char __user *
 	}
 
 	cnt = 0;
+	temp_buf[count] = '\0';
 	temp_str = strstrip(temp_buf);
 	while ((token = strsep(&temp_str, " ")) && *token && (cnt < 2)) {
-		strncpy(in_str[cnt], token, sizeof(in_str[cnt]));
+		strlcpy(in_str[cnt], token, sizeof(in_str[cnt]));
 		cnt += 1;
 	}
 
@@ -428,7 +417,7 @@ static ssize_t proc_sched_impt_task_write(struct file *file, const char __user *
 		return -EFAULT;
 	}
 
-	err = kstrtoint(strstrip(in_str[1]), 0, &pid);
+	err = kstrtoint(strstrip(in_str[1]), 10, &pid);
 	if (err) {
 		mutex_unlock(&impt_thd_mutex);
 		return err;
@@ -498,14 +487,14 @@ static const struct proc_ops proc_sched_impt_task_fops = {
 
 static void tpd_add_record(struct task_struct *tsk, int decision)
 {
-	struct tpd_entry* tpd_e;
+	struct tpd_entry *tpd_e;
 
-        tpd_e = kzalloc(sizeof(struct tpd_entry), GFP_ATOMIC);
-        if (!tpd_e)
+	tpd_e = kzalloc(sizeof(struct tpd_entry), GFP_ATOMIC);
+	if (!tpd_e)
 		return;
 
-        tpd_e->pid = tsk->pid;
-	strncpy(tpd_e->name, tsk->comm, TASK_COMM_LEN);
+	tpd_e->pid = tsk->pid;
+	strlcpy(tpd_e->name, tsk->comm, TASK_COMM_LEN);
 	tpd_e->tpd = decision;
 	hash_add(tpd_hash_table, &tpd_e->hash, tsk->pid);
 }
@@ -577,9 +566,9 @@ static void tag_from_tid(unsigned int pid, unsigned int tid, int decision)
 			tagging(p, decision);
 		}
 		put_task_struct(p);
-	} else {
-		ux_err("cannot find task!!! pid = %d", tid);
-	}
+	} else
+		ux_err("Can not find task!!! pid = %d", tid);
+
 	rcu_read_unlock();
 }
 
@@ -612,9 +601,8 @@ static ssize_t proc_tpd_set_write(struct file *file, const char __user *buf,
 	if (count > sizeof(buffer) - 1)
 		count = sizeof(buffer) - 1;
 
-	if (copy_from_user(buffer, buf, count)) {
+	if (copy_from_user(buffer, buf, count))
 		return -EFAULT;
-	}
 
 	ret = sscanf(buffer, "%u,%u,%d,%d\n",
 		&pid, &tid, &tpdenable, &tp_decision);
@@ -645,17 +633,16 @@ static ssize_t proc_tpd_cmds_write(struct file *file, const char __user *buf,
 	if (count > sizeof(buffer) - 1)
 		count = sizeof(buffer) - 1;
 
-	if (copy_from_user(buffer, buf, count)) {
+	if (copy_from_user(buffer, buf, count))
 		return -EFAULT;
-	}
 
 	ret = sscanf(buffer, "%u %d %s %s %s %s %s %s\n",
 		&tgid, &tp_decision,
 		threads[0], threads[1], threads[2], threads[3], threads[4], threads[5]);
 
-        ux_debug("tpd params: %u %d %s %s %s %s %s %s, from %s %d, total=%d\n",
-              tgid, tp_decision, threads[0], threads[1], threads[2], threads[3], threads[4], threads[5],
-              current->comm, current->pid, ret);
+	ux_debug("tpd params: %u %d %s %s %s %s %s %s, from %s %d, total=%d\n",
+		tgid, tp_decision, threads[0], threads[1], threads[2], threads[3], threads[4], threads[5],
+		current->comm, current->pid, ret);
 
 	for (i = 0; i < MAX_THREAD_INPUT; i++) {
 		if (strlen(threads[i]) > 0)
@@ -669,14 +656,13 @@ static ssize_t proc_tpd_cmds_write(struct file *file, const char __user *buf,
 
 static int tpd_hash_show(struct seq_file *m, void *v)
 {
-	struct tpd_entry* tpd_e;
-        unsigned long bkt;
+	struct tpd_entry *tpd_e;
+	unsigned long bkt;
 
-        hash_for_each(tpd_hash_table, bkt, tpd_e, hash) {
-                seq_printf(m, "pid=%d,name=%s,tpd=%d\n", tpd_e->pid, tpd_e->name, tpd_e->tpd);
-        }
+	hash_for_each(tpd_hash_table, bkt, tpd_e, hash)
+		seq_printf(m, "pid=%d,name=%s,tpd=%d\n", tpd_e->pid, tpd_e->name, tpd_e->tpd);
 
-        return 0;
+	return 0;
 }
 
 static int tpd_ignore_show(struct seq_file *seq_filp, void *v)
@@ -688,6 +674,7 @@ static int tpd_ignore_show(struct seq_file *seq_filp, void *v)
 static int tpd_open(struct inode *inode, struct file *file)
 {
 	int ret;
+
 	ret = single_open(file, tpd_ignore_show, NULL);
 	return ret;
 }
@@ -725,76 +712,68 @@ int oplus_sched_assist_proc_init(void)
 	struct proc_dir_entry *proc_node;
 
 	d_oplus_scheduler = proc_mkdir(OPLUS_SCHEDULER_PROC_DIR, NULL);
-	if(!d_oplus_scheduler) {
+	if (!d_oplus_scheduler) {
 		ux_err("failed to create proc dir oplus_scheduler\n");
 		goto err_creat_d_oplus_scheduler;
 	}
 
-	/* create slide_boost proc dir and it's child node */
-	d_slide_boost = proc_mkdir(OPLUS_SLIDEBOOST_PROC_DIR, d_oplus_scheduler);
-	if(!d_slide_boost) {
-		ux_err("failed to create proc dir slide_boost\n");
-		goto err_creat_d_slide_boost;
-	}
-
 	d_sched_assist = proc_mkdir(OPLUS_SCHEDASSIST_PROC_DIR, d_oplus_scheduler);
-	if(!d_sched_assist) {
+	if (!d_sched_assist) {
 		ux_err("failed to create proc dir sched_assist\n");
 		goto err_creat_d_sched_assist;
 	}
 
 	proc_node = proc_create("debug_enabled", 0666, d_sched_assist, &proc_debug_enabled_fops);
-	if(!proc_node) {
+	if (!proc_node) {
 		ux_err("failed to create proc node debug_enabled\n");
 		goto err_creat_debug_enabled;
 	}
 
 	proc_node = proc_create("sched_assist_enabled", 0666, d_sched_assist, &proc_sched_assist_enabled_fops);
-	if(!proc_node) {
+	if (!proc_node) {
 		ux_err("failed to create proc node sched_assist_enabled\n");
 		goto err_creat_sched_assist_enabled;
 	}
 
-
 	proc_node = proc_create("sched_assist_scene", 0666, d_sched_assist, &proc_sched_assist_scene_fops);
-	if(!proc_node) {
+	if (!proc_node) {
 		ux_err("failed to create proc node sched_assist_scene\n");
 		goto err_creat_sched_assist_scene;
 	}
 
 	proc_node = proc_create("ux_task", 0666, d_sched_assist, &proc_ux_task_fops);
-	if(!proc_node) {
+	if (!proc_node) {
 		ux_err("failed to create proc node ux_task\n");
 		goto err_creat_ux_task;
 	}
 
 	proc_node = proc_create("im_flag", 0666, d_sched_assist, &proc_im_flag_fops);
-	if(!proc_node) {
+	if (!proc_node) {
 		ux_err("failed to create proc node im_flag\n");
 		remove_proc_entry("im_flag", d_sched_assist);
 	}
 
 	proc_node = proc_create("sched_impt_task", 0666, d_sched_assist, &proc_sched_impt_task_fops);
-	if(!proc_node) {
+	if (!proc_node) {
 		ux_err("failed to create proc node sched_impt_task\n");
-		remove_proc_entry("sched_impt_task", d_sched_assist);;
+		remove_proc_entry("sched_impt_task", d_sched_assist);
 	}
 
 	/* proc of tpd feature */
 	proc_node = proc_create("tpd_id", 0666, d_sched_assist, &proc_tpd_set_fops);
-	if(!proc_node) {
+	if (!proc_node) {
 		ux_err("failed to create proc node tpd_id\n");
 		remove_proc_entry("tpd_id", d_sched_assist);
 	}
 
 	proc_node = proc_create("tpd_cmds", 0666, d_sched_assist, &proc_tpd_cmds_fops);
-	if(!proc_node) {
+	if (!proc_node) {
 		ux_err("failed to create proc node tpd_cmds\n");
 		remove_proc_entry("tpd_cmds", d_sched_assist);
 	}
 
 	proc_node = proc_create_data("tpd_task", 0666, d_sched_assist, &proc_tpd_task_fops, NULL);
-	if(!proc_node) {
+	if (!proc_node) {
 		ux_err("failed to create proc node tpd_task\n");
 		remove_proc_entry("tpd_task", d_sched_assist);
 	}
@@ -814,9 +793,6 @@ err_creat_debug_enabled:
 	remove_proc_entry(OPLUS_SCHEDASSIST_PROC_DIR, d_oplus_scheduler);
 
 err_creat_d_sched_assist:
-	remove_proc_entry(OPLUS_SLIDEBOOST_PROC_DIR, d_oplus_scheduler);
-
-err_creat_d_slide_boost:
 	remove_proc_entry(OPLUS_SCHEDULER_PROC_DIR, NULL);
 
 err_creat_d_oplus_scheduler:
@@ -834,7 +810,6 @@ void oplus_sched_assist_proc_deinit(void)
 	remove_proc_entry("sched_assist_scene", d_sched_assist);
 	remove_proc_entry("sched_assist_enabled", d_sched_assist);
 	remove_proc_entry(OPLUS_SCHEDASSIST_PROC_DIR, d_oplus_scheduler);
-	remove_proc_entry(OPLUS_SLIDEBOOST_PROC_DIR, d_oplus_scheduler);
 	remove_proc_entry(OPLUS_SCHEDULER_PROC_DIR, NULL);
 }
 

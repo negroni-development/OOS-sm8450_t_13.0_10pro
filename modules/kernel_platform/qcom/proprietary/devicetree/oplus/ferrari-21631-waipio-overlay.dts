@@ -22,7 +22,6 @@
 };
 
 &tlmm {
-//mael.ma@network.RF 2021/07/06 modify for rf_cable
   rf_cable0_active: rf_cable0_active {
     mux {
       pins = "gpio89";
@@ -38,7 +37,6 @@
 };
 
 &soc {
-//mael.ma@network.RF 2021/07/06 modify for rf_cable
   oplus_rf_cable {
     compatible = "oplus,rf_cable";
     interrupt-parent = <&tlmm>;
@@ -50,7 +48,6 @@
   };
 };
 //#ifdef OPLUS_FEATURE_CHG_BASIC
-/* Brian@BSP.CHG.Misc,2021/7/16, Modify for haptic calibration */
 &pm8350b_haptics {
     qcom,fifo-vmax-mv = <8900>;
     qcom,old-steady-vmax-mv = <8900>;//8.9v

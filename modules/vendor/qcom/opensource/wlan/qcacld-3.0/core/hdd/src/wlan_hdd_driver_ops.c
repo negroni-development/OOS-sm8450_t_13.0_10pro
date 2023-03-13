@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2015-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -66,7 +66,6 @@ static qdf_atomic_t is_recovery_cleanup_done;
 static uint8_t g_fw_host_hang_event[QDF_HANG_EVENT_DATA_SIZE];
 
 #ifdef OPLUS_FEATURE_WIFI_OPLUSWFD
-/*XiaZijian@CONNECTIVITY.WIFI.P2P.26106,20200703*/
 extern void oplus_wfd_set_hdd_ctx(struct hdd_context *hdd_ctx);
 extern void oplus_register_oplus_wfd_wlan_ops_qcom(void);
 #endif
@@ -645,10 +644,12 @@ static int __hdd_soc_probe(struct device *dev,
 	hdd_thermal_mitigation_register(hdd_ctx, dev);
 
 #ifdef OPLUS_FEATURE_WIFI_OPLUSWFD
-	/*XiaZijian@CONNECTIVITY.WIFI.P2P.26106,20200703*/
 	oplus_wfd_set_hdd_ctx(hdd_ctx);
 	oplus_register_oplus_wfd_wlan_ops_qcom();
 #endif
+	errno = hdd_set_suspend_mode(hdd_ctx);
+	if (errno)
+		hdd_err("Failed to set suspend mode in PLD; errno:%d", errno);
 
 	hdd_soc_load_unlock(dev);
 
@@ -832,7 +833,6 @@ static void __hdd_soc_remove(struct device *dev)
 		QWLAN_VERSIONSTR);
 
 #ifdef OPLUS_FEATURE_WIFI_OPLUSWFD
-        /*XiaZijian@CONNECTIVITY.WIFI.P2P.26106,20200703*/
 	oplus_wfd_set_hdd_ctx(NULL);
 #endif
 
@@ -987,13 +987,16 @@ static void __hdd_soc_recovery_shutdown(void)
 	struct hdd_context *hdd_ctx;
 	void *hif_ctx;
 
-	/* recovery starts via firmware down indication; ensure we got one */
-	QDF_BUG(cds_is_driver_recovering());
-	hdd_init_start_completion();
-
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 	if (!hdd_ctx)
 		return;
+
+	if (wlan_hdd_is_full_power_down_enable(hdd_ctx))
+		cds_set_driver_state(CDS_DRIVER_STATE_RECOVERING);
+
+	/* recovery starts via firmware down indication; ensure we got one */
+	QDF_BUG(cds_is_driver_recovering());
+	hdd_init_start_completion();
 
 	/*
 	 * Perform SSR related cleanup if it has not already been done as a
@@ -1209,6 +1212,8 @@ static int __wlan_hdd_bus_suspend(struct wow_enable_params wow_params,
 	hdd_info("starting bus suspend");
 
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
+	if (!hdd_ctx)
+		return -ENODEV;
 
 	err = wlan_hdd_validate_context(hdd_ctx);
 	if (err)
@@ -1905,6 +1910,8 @@ static int wlan_hdd_pld_suspend(struct device *dev,
 	struct hdd_context *hdd_ctx;
 
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
+	if (!hdd_ctx)
+		return -ENODEV;
 
 	errno = wlan_hdd_validate_context(hdd_ctx);
 	if (errno)

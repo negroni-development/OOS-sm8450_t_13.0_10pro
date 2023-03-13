@@ -7,6 +7,7 @@
 void cb_update(struct cpufreq_policy *pol, u64 time);
 void cb_reset(int cpu, u64 time);
 unsigned int cb_cap(struct cpufreq_policy *pol, unsigned int freq);
+void cb_stuff_init(struct cpufreq_policy *policy);
 #else
 static inline void cb_update(struct cpufreq_policy *pol, u64 time)
 {
@@ -17,6 +18,9 @@ static inline void cb_reset(int cpu, u64 time)
 }
 
 static inline unsigned int cb_cap(struct cpufreq_policy *pol, unsigned int freq)
+{
+}
+static inline void cb_stuff_init(struct cpufreq_policy *policy)
 {
 }
 #endif

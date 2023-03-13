@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2011-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -67,6 +68,7 @@ static void lim_fill_status_code(uint8_t frame_type,
 			*proto_status_code = STATUS_AUTH_TX_FAIL;
 			break;
 		case LIM_ACK_RCD_FAILURE:
+		case LIM_ACK_NOT_RCD:
 			*proto_status_code = STATUS_AUTH_NO_ACK_RECEIVED;
 			break;
 		case LIM_ACK_RCD_SUCCESS:
@@ -81,6 +83,7 @@ static void lim_fill_status_code(uint8_t frame_type,
 			*proto_status_code = STATUS_ASSOC_TX_FAIL;
 			break;
 		case LIM_ACK_RCD_FAILURE:
+		case LIM_ACK_NOT_RCD:
 			*proto_status_code = STATUS_ASSOC_NO_ACK_RECEIVED;
 			break;
 		case LIM_ACK_RCD_SUCCESS:
@@ -348,44 +351,6 @@ end:
 		lim_send_start_bss_confirm(mac_ctx, &mlm_start_cnf);
 }
 
-void
-lim_post_join_set_link_state_callback(struct mac_context *mac, uint32_t vdev_id,
-				      QDF_STATUS status)
-{
-	tLimMlmJoinCnf mlm_join_cnf;
-	struct pe_session *session_entry;
-
-	session_entry = pe_find_session_by_vdev_id(mac, vdev_id);
-	if (!session_entry) {
-		pe_err("vdev_id:%d PE session is NULL", vdev_id);
-		return;
-	}
-
-	if (QDF_IS_STATUS_ERROR(status)) {
-		pe_err("vdev%d: Failed to create peer", session_entry->vdev_id);
-		goto failure;
-	}
-
-	/*
-	 * store the channel switch session_entry in the lim
-	 * global variable
-	 */
-	session_entry->channelChangeReasonCode = LIM_SWITCH_CHANNEL_JOIN;
-	session_entry->pLimMlmReassocRetryReq = NULL;
-	lim_send_switch_chnl_params(mac, session_entry);
-
-	return;
-
-failure:
-	MTRACE(mac_trace(mac, TRACE_CODE_MLM_STATE, session_entry->peSessionId,
-			 session_entry->limMlmState));
-	session_entry->limMlmState = eLIM_MLM_IDLE_STATE;
-	mlm_join_cnf.resultCode = eSIR_SME_PEER_CREATE_FAILED;
-	mlm_join_cnf.sessionId = session_entry->peSessionId;
-	mlm_join_cnf.protStatusCode = STATUS_UNSPECIFIED_FAILURE;
-	lim_post_sme_message(mac, LIM_MLM_JOIN_CNF, (uint32_t *) &mlm_join_cnf);
-}
-
 void lim_send_peer_create_resp(struct mac_context *mac, uint8_t vdev_id,
 			       QDF_STATUS qdf_status, uint8_t *peer_mac)
 {
@@ -451,8 +416,13 @@ lim_process_mlm_post_join_suspend_link(struct mac_context *mac_ctx,
 	mac_ctx->lim.lim_timers.gLimJoinFailureTimer.sessionId =
 		session->peSessionId;
 
-	lim_post_join_set_link_state_callback(mac_ctx, session->vdev_id,
-					      QDF_STATUS_SUCCESS);
+	/*
+	 * store the channel switch session_entry in the lim
+	 * global variable
+	 */
+	session->channelChangeReasonCode = LIM_SWITCH_CHANNEL_JOIN;
+	session->pLimMlmReassocRetryReq = NULL;
+	lim_send_switch_chnl_params(mac_ctx, session);
 }
 
 /**
@@ -484,7 +454,6 @@ lim_process_mlm_post_join_suspend_link(struct mac_context *mac_ctx,
 void lim_process_mlm_join_req(struct mac_context *mac_ctx,
 			      tLimMlmJoinReq *mlm_join_req)
 {
-	tLimMlmJoinCnf mlmjoin_cnf;
 	uint8_t sessionid;
 	struct pe_session *session;
 
@@ -493,41 +462,11 @@ void lim_process_mlm_join_req(struct mac_context *mac_ctx,
 	session = pe_find_session_by_session_id(mac_ctx, sessionid);
 	if (!session) {
 		pe_err("SessionId:%d does not exist", sessionid);
-		goto error;
-	}
-
-	if (!LIM_IS_AP_ROLE(session) &&
-	     ((session->limMlmState == eLIM_MLM_IDLE_STATE) ||
-	     (session->limMlmState == eLIM_MLM_JOINED_STATE)) &&
-	     (SIR_MAC_GET_ESS
-		(mlm_join_req->bssDescription.capabilityInfo) !=
-		SIR_MAC_GET_IBSS(mlm_join_req->bssDescription.
-			capabilityInfo))) {
-		session->pLimMlmJoinReq = mlm_join_req;
-		lim_process_mlm_post_join_suspend_link(mac_ctx, session);
 		return;
 	}
 
-	/**
-	 * Should not have received JOIN req in states other than
-	 * Idle state or on AP.
-	 * Return join confirm with invalid parameters code.
-	 */
-	pe_err("Session:%d Unexpected Join req, role %d state %X",
-		session->peSessionId, GET_LIM_SYSTEM_ROLE(session),
-		session->limMlmState);
-	lim_print_mlm_state(mac_ctx, LOGE, session->limMlmState);
-
-error:
-	qdf_mem_free(mlm_join_req);
-	if (session)
-		session->pLimMlmJoinReq = NULL;
-	mlmjoin_cnf.resultCode = eSIR_SME_PEER_CREATE_FAILED;
-	mlmjoin_cnf.sessionId = sessionid;
-	mlmjoin_cnf.protStatusCode = STATUS_UNSPECIFIED_FAILURE;
-	lim_post_sme_message(mac_ctx, LIM_MLM_JOIN_CNF,
-		(uint32_t *)&mlmjoin_cnf);
-
+	session->pLimMlmJoinReq = mlm_join_req;
+	lim_process_mlm_post_join_suspend_link(mac_ctx, session);
 }
 
 /**
@@ -1749,8 +1688,7 @@ static void lim_handle_sae_auth_timeout(struct mac_context *mac_ctx,
 	}
 
 	if (!sae_retry->sae_auth_max_retry) {
-		if (MLME_IS_ROAMING_IN_PROG(mac_ctx->psoc,
-					    session_entry->vdev_id)) {
+		if (!wlan_cm_is_vdev_connecting(session_entry->vdev)) {
 			mac_hdr = (tpSirMacMgmtHdr)sae_retry->sae_auth.ptr;
 			lim_send_pre_auth_failure(session_entry->vdev_id,
 						  mac_hdr->bssId);

@@ -200,7 +200,6 @@ static int swr_haptics_slave_enable(struct swr_haptics_dev *swr_hap)
 		return 0;
 
 #ifdef OPLUS_ARCH_EXTENDS
-/*liuhaituo@PSW.MM.AudioDriver, 2021/03/12, Add for decouple haptics driver from snd card*/
 	if (!IS_ERR(swr_hap->slave_vdd)) {
 #endif /* OPLUS_ARCH_EXTENDS */
 		rc = regulator_enable(swr_hap->slave_vdd);
@@ -210,7 +209,6 @@ static int swr_haptics_slave_enable(struct swr_haptics_dev *swr_hap)
 			return rc;
 		}
 #ifdef OPLUS_ARCH_EXTENDS
-/*liuhaituo@PSW.MM.AudioDriver, 2021/03/12, Add for decouple haptics driver from snd card*/
 	}
 #endif /* OPLUS_ARCH_EXTENDS */
 
@@ -228,7 +226,6 @@ static int swr_haptics_slave_disable(struct swr_haptics_dev *swr_hap)
 		return 0;
 
 #ifdef OPLUS_ARCH_EXTENDS
-/*liuhaituo@PSW.MM.AudioDriver, 2021/03/12, Add for decouple haptics driver from snd card*/
 	if (!IS_ERR(swr_hap->slave_vdd)) {
 #endif /* OPLUS_ARCH_EXTENDS */
 		rc = regulator_disable(swr_hap->slave_vdd);
@@ -238,7 +235,6 @@ static int swr_haptics_slave_disable(struct swr_haptics_dev *swr_hap)
 			return rc;
 		}
 #ifdef OPLUS_ARCH_EXTENDS
-/*liuhaituo@PSW.MM.AudioDriver, 2021/03/12, Add for decouple haptics driver from snd card*/
 	}
 #endif /* OPLUS_ARCH_EXTENDS */
 
@@ -553,7 +549,6 @@ static int swr_haptics_probe(struct swr_device *sdev)
 	if (IS_ERR(swr_hap->slave_vdd)) {
 		rc = PTR_ERR(swr_hap->slave_vdd);
 #ifdef OPLUS_ARCH_EXTENDS
-/*liuhaituo@PSW.MM.AudioDriver, 2021/03/12, Add for decouple haptics driver from snd card*/
 		dev_err(swr_hap->dev, "%s: get swr-slave-supply failed, rc=%d\n",
 				__func__, rc);
 		if (rc != -EPROBE_DEFER)

@@ -291,7 +291,7 @@ static int check_alive(struct sdio_func *func, int err_state, int iscmd53)
 	} else {
 		pr_err("%s: explorer sdio no dev error or sdio device busy, err: %d\n", __func__, err_state);
 #ifdef EXCEPTION_SDIO_DEBUG
-		info->subType = EXCEPTION_SDIO_ELSE_ERR;
+		info->subType = -(err_state);
 		info->majorType = EXCEPTION_SDIO_DEV_ERR;
 		info->action = EXCEPTION_ACT_NONE;
 		info->level = EXCEPTION_ERROR;
@@ -2574,7 +2574,7 @@ static void explorer_sdio_remove(struct sdio_func *func)
 	epd_save->hw_probe_done = false;
 	complete(&epd_save->sdio_remove_completion);
 
-	pr_debug("zeku:%s, sdio driver is removed\n", __func__);
+	pr_err("zeku:%s, sdio driver is removed\n", __func__);
 
 	return;
 }

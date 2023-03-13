@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk.h>
@@ -329,8 +330,7 @@ clks_gdsc_off:
 	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
 
 gdsc_off:
-	/* Poll to make sure that the CX is off */
-	gen7_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
+	gen7_gmu_disable_gdsc(adreno_dev);
 
 	gen7_rdpm_cx_freq_update(gmu, 0);
 
@@ -352,6 +352,13 @@ static int gen7_hwsched_gmu_boot(struct adreno_device *adreno_dev)
 	ret = gen7_gmu_enable_clks(adreno_dev);
 	if (ret)
 		goto gdsc_off;
+
+	/*
+	 * TLB operations are skipped during slumber. Incase CX doesn't
+	 * go down, it can result in incorrect translations due to stale
+	 * TLB entries. Flush TLB before boot up to ensure fresh start.
+	 */
+	kgsl_mmu_flush_tlb(&device->mmu);
 
 	ret = gen7_rscc_wakeup_sequence(adreno_dev);
 	if (ret)
@@ -391,8 +398,7 @@ clks_gdsc_off:
 	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
 
 gdsc_off:
-	/* Poll to make sure that the CX is off */
-	gen7_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
+	gen7_gmu_disable_gdsc(adreno_dev);
 
 	gen7_rdpm_cx_freq_update(gmu, 0);
 
@@ -479,8 +485,7 @@ static int gen7_hwsched_gmu_power_off(struct adreno_device *adreno_dev)
 
 	clk_bulk_disable_unprepare(gmu->num_clks, gmu->clks);
 
-	/* Poll to make sure that the CX is off */
-	gen7_cx_regulator_disable_wait(gmu->cx_gdsc, device, 5000);
+	gen7_gmu_disable_gdsc(adreno_dev);
 
 	gen7_rdpm_cx_freq_update(gmu, 0);
 
@@ -529,6 +534,14 @@ static int gen7_hwsched_gpu_boot(struct adreno_device *adreno_dev)
 		gen7_disable_gpu_irq(adreno_dev);
 		goto err;
 	}
+
+	/*
+	 * At this point it is safe to assume that we recovered. Setting
+	 * this field allows us to take a new snapshot for the next failure
+	 * if we are prioritizing the first unrecoverable snapshot.
+	 */
+	if (device->snapshot)
+		device->snapshot->recovered = true;
 
 	device->reset_counter++;
 err:
@@ -914,17 +927,17 @@ static void scale_gmu_frequency(struct adreno_device *adreno_dev, int buslevel)
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
 	struct gen7_gmu_device *gmu = to_gen7_gmu(adreno_dev);
 	static unsigned long prev_freq;
-	unsigned long freq = GMU_FREQ_MIN;
+	unsigned long freq = gmu->freqs[0];
 
 	if (!gmu->perf_ddr_bw)
 		return;
 
 	/*
 	 * Scale the GMU if DDR is at a CX corner at which GMU can run at
-	 * 500 Mhz
+	 * a higher frequency
 	 */
 	if (pwr->ddr_table[buslevel] >= gmu->perf_ddr_bw)
-		freq = GMU_FREQ_MAX;
+		freq = gmu->freqs[GMU_MAX_PWRLEVELS - 1];
 
 	if (prev_freq == freq)
 		return;

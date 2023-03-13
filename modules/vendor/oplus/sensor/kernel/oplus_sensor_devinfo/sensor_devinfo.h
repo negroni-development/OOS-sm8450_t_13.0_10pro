@@ -36,7 +36,8 @@ typedef struct {//old struct
         };
         int ps_data[6];
     };
-    int nReserve[43];
+	int baro_cali_offset;
+	int nReserve[42];
 } sensor_cali_file_v1_t;
 
 typedef struct {//new struct
@@ -69,7 +70,8 @@ typedef struct {//new struct
     int cct_reserve[4];
     int rear_als_gain;
     int rear_als_reserve[9];
-    int nReserve[14];
+	int baro_cali_offset;
+	int nReserve[13];
 } sensor_cali_file_v2_t;
 
 
@@ -99,6 +101,7 @@ struct cali_data {
     int cct_cali_data[6];
     int rear_als_value;
     int rear_als_factor;
+	int baro_cali_offset;
 };
 
 struct oplus_als_cali_data {
@@ -161,5 +164,6 @@ extern int oplus_send_selftest_cmd_to_hub(int sensorType, void *testresult);
 extern int oplus_send_factory_mode_cmd_to_hub(int sensorType, int mode, void *result);
 extern int get_light_sensor_type(void);
 extern bool is_support_new_arch_func(void);
+extern bool is_support_mtk_origin_cali_func(void);
 extern int get_sensor_parameter_rear_als(struct cali_data *data);
 #endif //SENSOR_DEVINFO_H

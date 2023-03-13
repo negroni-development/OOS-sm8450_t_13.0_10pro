@@ -10,11 +10,30 @@
 #define CAM_IMX709_SENSOR_ID 0x709
 
 struct cam_sensor_i2c_reg_setting_array {
-	struct cam_sensor_i2c_reg_array reg_setting[1280];
+	struct cam_sensor_i2c_reg_array reg_setting[1750];
 	unsigned short size;
 	enum camera_sensor_i2c_type addr_type;
 	enum camera_sensor_i2c_type data_type;
 	unsigned short delay;
+};
+struct cam_sensor_aon_reg_setting_array {
+	struct cam_sensor_i2c_reg_array reg_setting[1];
+	unsigned short size;
+	enum camera_sensor_i2c_type addr_type;
+	enum camera_sensor_i2c_type data_type;
+	unsigned short delay;
+};
+
+struct cam_sensor_i2c_reg_setting_array_large {
+	struct cam_sensor_i2c_reg_array reg_setting[5920];
+	unsigned short size;
+	enum camera_sensor_i2c_type addr_type;
+	enum camera_sensor_i2c_type data_type;
+	unsigned short delay;
+};
+
+struct cam_sensor_settings_large {
+	struct cam_sensor_i2c_reg_setting_array_large ov32c_setting;
 };
 
 struct cam_sensor_settings {
@@ -40,8 +59,20 @@ struct cam_sensor_settings {
 	struct cam_sensor_i2c_reg_setting_array ov08a10_setting;
 	struct cam_sensor_i2c_reg_setting_array imx766_setting;
 	struct cam_sensor_i2c_reg_setting_array imx682_setting;
+	struct cam_sensor_i2c_reg_setting_array ov32c_setting;
+	struct cam_sensor_i2c_reg_setting_array ov08d10_setting;
 	struct cam_sensor_i2c_reg_setting_array imx709_setting;
+	struct cam_sensor_i2c_reg_setting_array imx709_aon_irq_setting;
+	struct cam_sensor_i2c_reg_setting_array imx709_aon_irq_he_clr_setting;
 	struct cam_sensor_i2c_reg_setting_array s5kjn1sq03_setting;
+	struct cam_sensor_i2c_reg_setting_array ov08d_setting;
+	struct cam_sensor_i2c_reg_setting_array s5k3p9_streamoff_setting;
+	struct cam_sensor_i2c_reg_setting_array s5k3p9_setting;
+	struct cam_sensor_i2c_reg_setting_array s5k3p9_setting1;
+	struct cam_sensor_i2c_reg_setting_array s5k3p9_setting2;
+	struct cam_sensor_i2c_reg_setting_array ov32c_setting1;
+	struct cam_sensor_i2c_reg_setting_array ov32c_setting2;
+
 };
 
 int cam_ftm_power_down(struct cam_sensor_ctrl_t *s_ctrl);
@@ -62,5 +93,18 @@ int32_t cam_sensor_update_id_info(struct cam_cmd_probe_v2 *probe_info,
 int cam_sensor_stop(struct cam_sensor_ctrl_t *s_ctrl);
 int cam_sensor_start(struct cam_sensor_ctrl_t *s_ctrl);
 int32_t oplus_cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,void *arg);
+int oplus_sensor_sony_get_dpc_data(struct cam_sensor_ctrl_t *s_ctrl);
+
+int cam_aon_irq_power_up(struct cam_sensor_ctrl_t *s_ctrl);
+int cam_aon_irq_power_down(struct cam_sensor_ctrl_t *s_ctrl);
+irqreturn_t aon_interupt_handler(int irq, void *data);
+void cam_aon_do_work(struct work_struct *work);
+bool cam_aon_if_do(void);
+
+int oplus_shift_sensor_mode(struct cam_sensor_ctrl_t *s_ctrl);
+
+int oplus_cam_get_sensor_temp(struct cam_sensor_ctrl_t *s_ctrl, int32_t *sensor_temp);
+
+void check_streamoff(struct cam_sensor_ctrl_t *s_ctrl);
 
 #endif /* _OPLUS_CAM_SENSOR_CORE_H_ */

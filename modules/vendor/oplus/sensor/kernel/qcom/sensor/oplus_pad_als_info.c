@@ -377,31 +377,37 @@ static ssize_t row_coe_write_proc(struct file *file, const char __user *buf,
 static const struct proc_ops row_coe_fops = {
         .proc_read = row_coe_read_proc,
         .proc_write = row_coe_write_proc,
+        .proc_lseek = default_llseek,
 };
 
 static const struct proc_ops red_max_lux_fops = {
         .proc_read = red_max_lux_read_proc,
         .proc_write = red_max_lux_write_proc,
+        .proc_lseek = default_llseek,
 };
 
 static const struct proc_ops white_max_lux_fops = {
         .proc_read = white_max_lux_read_proc,
         .proc_write = white_max_lux_write_proc,
+        .proc_lseek = default_llseek,
 };
 
 static const struct proc_ops blue_max_lux_fops = {
         .proc_read = blue_max_lux_read_proc,
         .proc_write = blue_max_lux_write_proc,
+        .proc_lseek = default_llseek,
 };
 
 static const struct proc_ops green_max_lux_fops = {
         .proc_read = green_max_lux_read_proc,
         .proc_write = green_max_lux_write_proc,
+        .proc_lseek = default_llseek,
 };
 
 static const struct proc_ops cali_coe_fops = {
         .proc_read = cali_coe_read_proc,
         .proc_write = cali_coe_write_proc,
+        .proc_lseek = default_llseek,
 };
 #else
 static struct file_operations row_coe_fops = {

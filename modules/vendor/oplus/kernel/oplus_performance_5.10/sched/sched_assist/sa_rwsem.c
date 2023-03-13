@@ -10,19 +10,8 @@
 #include <linux/sched.h>
 #include <linux/list.h>
 #include <linux/rwsem.h>
+#include <kernel/sched/sched.h>
 
-/*
-enum rwsem_waiter_type {
-	RWSEM_WAITING_FOR_WRITE,
-	RWSEM_WAITING_FOR_READ
-};
-
-struct rwsem_waiter {
-	struct list_head list;
-	struct task_struct *task;
-	enum rwsem_waiter_type type;
-};
-*/
 #define RWSEM_READER_OWNED	(1UL << 0)
 #define RWSEM_RD_NONSPINNABLE	(1UL << 1)
 #define RWSEM_WR_NONSPINNABLE	(1UL << 2)
@@ -31,13 +20,6 @@ struct rwsem_waiter {
 
 #define RWSEM_WRITER_LOCKED	(1UL << 0)
 #define RWSEM_WRITER_MASK	RWSEM_WRITER_LOCKED
-
-/* used for kernel version < 5.4
-static inline bool rwsem_owner_is_writer(struct task_struct *owner)
-{
-	return owner && owner != RWSEM_READER_OWNED;
-}
-*/
 
 static inline struct task_struct *rwsem_owner(struct rw_semaphore *sem)
 {
@@ -69,6 +51,7 @@ static void rwsem_list_add_ux(struct list_head *entry, struct list_head *head)
 	struct list_head *pos = NULL;
 	struct list_head *n = NULL;
 	struct rwsem_waiter *waiter = NULL;
+
 	list_for_each_safe(pos, n, head) {
 		waiter = list_entry(pos, struct rwsem_waiter, list);
 #ifdef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM
@@ -81,9 +64,8 @@ static void rwsem_list_add_ux(struct list_head *entry, struct list_head *head)
 		}
 	}
 
-	if (pos == head) {
+	if (pos == head)
 		list_add_tail(entry, head);
-	}
 }
 
 bool oplus_rwsem_list_add(struct task_struct *tsk, struct list_head *entry, struct list_head *head)
@@ -93,9 +75,8 @@ bool oplus_rwsem_list_add(struct task_struct *tsk, struct list_head *entry, stru
 	if (unlikely(!global_sched_assist_enabled))
 		return false;
 
-	if (!entry || !head) {
+	if (!entry || !head)
 		return false;
-	}
 
 	is_ux = test_task_ux(tsk);
 	if (is_ux) {
@@ -106,6 +87,69 @@ bool oplus_rwsem_list_add(struct task_struct *tsk, struct list_head *entry, stru
 	return false;
 }
 EXPORT_SYMBOL(oplus_rwsem_list_add);
+
+int rwsem_max_block_time_ms = 5000;
+module_param_named(rwsem_max_block_time_ms, rwsem_max_block_time_ms, int, 0660);
+bool waiter_block_too_long(struct rwsem_waiter *waiter)
+{
+	struct task_struct *tsk = waiter->task;
+	struct sched_entity *se;
+	struct rq *rq;
+	struct rq_flags rf;
+	u64 block_start;
+	u64 sleep_start;
+
+	if (!tsk)
+		return false;
+	se = &tsk->se;
+	if (!se)
+		return false;
+	rq = task_rq_lock(tsk, &rf);
+
+	block_start = schedstat_val(se->statistics.block_start);
+	sleep_start = schedstat_val(se->statistics.sleep_start);
+
+	if (block_start) {
+		u64 delta = (rq_clock(rq) - block_start);
+		if ((s64)delta < 0)
+			delta = 0;
+		delta >>= 20;
+		if (delta > rwsem_max_block_time_ms)
+			goto stop_boost;
+	}
+
+	if (sleep_start) {
+		u64 delta = (rq_clock(rq) - sleep_start);
+		if ((s64)delta < 0)
+                        delta = 0;
+		delta >>= 20;
+		if (delta > rwsem_max_block_time_ms)
+			goto stop_boost;
+	}
+	task_rq_unlock(rq, tsk, &rf);
+	return false;
+stop_boost:
+	task_rq_unlock(rq, tsk, &rf);
+	return true;
+}
+
+bool rwsem_list_unux_hang_check(struct rw_semaphore *sem)
+{
+	struct list_head *pos = NULL;
+	struct list_head *n = NULL;
+	struct rwsem_waiter *waiter = NULL;
+
+	list_for_each_safe(pos, n, &sem->wait_list) {
+		waiter = list_entry(pos, struct rwsem_waiter, list);
+		if (test_task_ux(waiter->task))
+			continue;
+		if (waiter_block_too_long(waiter))
+			return true;
+		else
+			return false;
+	}
+	return false;
+}
 
 bool rwsem_list_add_skip_ux(struct task_struct *in_tsk, struct task_struct *tsk)
 {
@@ -127,23 +171,25 @@ static void rwsem_set_inherit_ux(struct rw_semaphore *sem)
 	/* set writer as ux task */
 	if (is_ux && !is_rwsem_reader_owned(sem) && !test_inherit_ux(owner, INHERIT_UX_RWSEM)) {
 		int type = get_ux_state_type(owner);
-		if ((UX_STATE_NONE == type) || (UX_STATE_INHERIT == type)) {
+
+		if ((type == UX_STATE_NONE) || (type == UX_STATE_INHERIT))
 			set_inherit_ux(owner, INHERIT_UX_RWSEM, oplus_get_ux_depth(current), oplus_get_ux_state(current));
-		}
 	}
 }
 
 static void rwsem_unset_inherit_ux(struct rw_semaphore *sem)
 {
-	if (test_inherit_ux(current, INHERIT_UX_RWSEM)) {
+	if (test_inherit_ux(current, INHERIT_UX_RWSEM))
 		unset_inherit_ux(current, INHERIT_UX_RWSEM);
-	}
 }
 
 /* implement vender hook in kernel/locking/rwsem.c */
 void android_vh_alter_rwsem_list_add_handler(void *unused, struct rwsem_waiter *waiter,
 			struct rw_semaphore *sem, bool *already_on_list)
 {
+	/* prevent unux starve */
+	if (rwsem_list_unux_hang_check(sem))
+		return;
 	if (oplus_rwsem_list_add(waiter->task, &waiter->list, &sem->wait_list))
 		*already_on_list = true;
 }

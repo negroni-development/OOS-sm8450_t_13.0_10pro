@@ -22,12 +22,34 @@ static struct kobj_attribute _name##_attr = {	\
 
 extern int mod_timer(struct timer_list *timer, unsigned long expires);
 extern void pm_get_active_wakeup_sources(char *pending_sources, size_t max);
+extern void cmdq_dump_usage(void);
+
+struct kthread_cp {
+	unsigned long flags;
+	unsigned int cpu;
+	int (*threadfn)(void *);
+	void *data;
+	mm_segment_t oldfs;
+	struct completion parked;
+	struct completion exited;
+#ifdef CONFIG_BLK_CGROUP
+	struct cgroup_subsys_state *blkcg_css;
+#endif
+};
+
+struct kworker_stat {
+	bool kworker;
+	work_func_t	current_func;
+	work_func_t	last_func;
+};
+
 struct task_stat {
 	pid_t pid;
 	pid_t tgid;
 	unsigned int r_time;
 	unsigned int pwr;
 	unsigned int lcore_pwr;
+	struct kworker_stat worker;
 	char comm[TASK_COMM_LEN];
 };
 
@@ -37,6 +59,7 @@ struct task_cpustat_cp {
 	enum cpu_usage_stat type;
 	bool l_core;
 	int freq;
+	struct kworker_stat worker;
 	unsigned long begin;
 	unsigned long end;
 	char comm[TASK_COMM_LEN];

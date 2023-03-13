@@ -56,8 +56,7 @@ do {									     \
 #define RPM_GLINK_CID_MAX	65536
 
 static int should_wake;
-int glink_resume_pkt;
-EXPORT_SYMBOL(glink_resume_pkt);
+static int glink_resume_pkt;
 
 struct glink_msg {
 	__le16 cmd;
@@ -971,6 +970,18 @@ static int qcom_glink_rx_defer(struct qcom_glink *glink, size_t extra)
 	return 0;
 }
 
+bool qcom_glink_is_wakeup(bool reset)
+{
+	if (!glink_resume_pkt)
+		return false;
+
+	if (reset)
+		glink_resume_pkt = false;
+
+	return true;
+}
+EXPORT_SYMBOL(qcom_glink_is_wakeup);
+
 static int qcom_glink_rx_data(struct qcom_glink *glink, size_t avail)
 {
 	struct glink_core_rx_intent *intent;
@@ -1081,6 +1092,12 @@ static int qcom_glink_rx_data(struct qcom_glink *glink, size_t avail)
 			CH_ERR(channel, "callback not present\n");
 		}
 		spin_unlock(&channel->recv_lock);
+
+		if (qcom_glink_is_wakeup(true)) {
+			pr_info("%s[%d:%d] %s: wakeup packet size:%d\n",
+				channel->name, channel->lcid, channel->rcid,
+				__func__, intent->offset);
+		}
 
 		intent->offset = 0;
 		channel->buf = NULL;
@@ -1263,6 +1280,13 @@ static int qcom_glink_native_rx(struct qcom_glink *glink, int iterations)
 	int ret = 0;
 	int i;
 
+	if (should_wake) {
+		pr_info("%s: wakeup %s\n", __func__, glink->irqname);
+		glink_resume_pkt = true;
+		should_wake = false;
+		pm_system_wakeup();
+	}
+
 	spin_lock_irqsave(&glink->irq_lock, flags);
 	if (glink->irq_running) {
 		spin_unlock_irqrestore(&glink->irq_lock, flags);
@@ -1271,12 +1295,6 @@ static int qcom_glink_native_rx(struct qcom_glink *glink, int iterations)
 	glink->irq_running = true;
 	spin_unlock_irqrestore(&glink->irq_lock, flags);
 
-	if (should_wake) {
-		pr_info("%s: wakeup %s\n", __func__, glink->irqname);
-		glink_resume_pkt = true;
-		should_wake = false;
-		pm_system_wakeup();
-	}
 	/* To wakeup any blocking writers */
 	wake_up_all(&glink->tx_avail_notify);
 
@@ -2046,7 +2064,7 @@ static void qcom_glink_set_affinity(struct qcom_glink *glink, u32 *arr,
 		dev_err(glink->dev, "failed to set task affinity\n");
 }
 
-static void qcom_glink_notif_reset(void *data)
+void qcom_glink_early_ssr_notify(void *data)
 {
 	struct qcom_glink *glink = data;
 	struct glink_channel *channel;
@@ -2067,6 +2085,7 @@ static void qcom_glink_notif_reset(void *data)
 	}
 	spin_unlock_irqrestore(&glink->idr_lock, flags);
 }
+EXPORT_SYMBOL(qcom_glink_early_ssr_notify);
 
 static void qcom_glink_cancel_rx_work(struct qcom_glink *glink)
 {
@@ -2267,7 +2286,7 @@ void qcom_glink_native_remove(struct qcom_glink *glink)
 	int cid;
 	int ret;
 
-	qcom_glink_notif_reset(glink);
+	qcom_glink_early_ssr_notify(glink);
 	disable_irq(glink->irq);
 	qcom_glink_cancel_rx_work(glink);
 

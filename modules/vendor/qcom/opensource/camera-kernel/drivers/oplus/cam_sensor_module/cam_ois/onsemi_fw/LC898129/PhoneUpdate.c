@@ -773,11 +773,11 @@ UINT_8 FlashProgram129( UINT_8 ModuleVendor, UINT_8 ActVer,struct cam_ois_ctrl_t
 					vaddr = NULL;
 					return 0;
 				}
+				BootMode() ;
+				rc = FlashUpdate129( ptr );
 			}else{
 				CAM_ERR(CAM_OIS, "read ois current version 0x8000 failed ");
 			}
-			BootMode() ;
-			rc = FlashUpdate129( ptr );
 			break;
 		}else{
 			CAM_ERR(CAM_OIS, "ptr->Index:0x%x Vendor:0x%x", ptr->Index,( ((UINT_16)ModuleVendor << 8) + ActVer));

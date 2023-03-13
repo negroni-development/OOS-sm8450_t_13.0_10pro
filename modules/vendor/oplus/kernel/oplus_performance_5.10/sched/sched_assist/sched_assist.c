@@ -8,12 +8,12 @@
 #include <linux/module.h>
 #include <linux/version.h>
 #include <kernel/sched/sched.h>
-
+#include <trace/hooks/cgroup.h>
+#include <trace/hooks/signal.h>
 #include "sched_assist.h"
 #include "sa_common.h"
 #include "sa_sysfs.h"
 #include "sa_binder.h"
-#include "sa_workqueue.h"
 #include "sa_exec.h"
 #include "sa_fair.h"
 #include "sa_mutex.h"
@@ -46,7 +46,9 @@ static int register_scheduler_vendor_hooks(void)
 	REGISTER_TRACE_VH(android_vh_mutex_unlock_slowpath, android_vh_mutex_unlock_slowpath_handler);
 
 	/* register vender hook in kernel/locking/rwsem.c */
-	//REGISTER_TRACE_VH(android_vh_alter_rwsem_list_add, android_vh_alter_rwsem_list_add_handler);
+#ifdef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM
+	REGISTER_TRACE_VH(android_vh_alter_rwsem_list_add, android_vh_alter_rwsem_list_add_handler);
+#endif
 	REGISTER_TRACE_VH(android_vh_rwsem_wake, android_vh_rwsem_wake_handler);
 	REGISTER_TRACE_VH(android_vh_rwsem_wake_finish, android_vh_rwsem_wake_finish_handler);
 
@@ -76,13 +78,12 @@ static int register_scheduler_vendor_hooks(void)
 #ifdef CONFIG_OPLUS_BINDER_PRIO_SKIP
 	REGISTER_TRACE_VH(android_vh_binder_priority_skip, android_vh_binder_priority_skip_handler);
 #endif
-#ifdef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM
 	REGISTER_TRACE_VH(android_vh_binder_proc_transaction_end, android_vh_binder_proc_transaction_end_handler);
-#endif
 
-	/* register vender hook in kernel/workqueue.c */
-	/* REGISTER_TRACE_VH(android_vh_create_worker, android_vh_create_worker_handler); */
-
+	/* register vendor hook in kernel/cgroup/cgroup-v1.c */
+	REGISTER_TRACE_VH(android_vh_cgroup_set_task, android_vh_cgroup_set_task_handler);
+	/* register vendor hook in kernel/signal.c  */
+	REGISTER_TRACE_VH(android_vh_do_send_sig_info, android_vh_do_send_sig_handler);
 	return 0;
 }
 
@@ -107,16 +108,14 @@ static int __init oplus_sched_assist_init(void)
 	update_ux_sched_cputopo();
 
 	ret = oplus_sched_assist_proc_init();
-	if (ret != 0) {
+	if (ret != 0)
 		return ret;
-	}
 
 	ret = register_scheduler_vendor_hooks();
-	if (ret != 0) {
+	if (ret != 0)
 		return ret;
-	}
 
-	ux_debug("oplus_sched_assist_init succeed!\n");
+	ux_debug("sched assist init succeed!\n");
 	return 0;
 }
 

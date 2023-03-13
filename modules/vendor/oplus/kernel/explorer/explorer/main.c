@@ -46,8 +46,8 @@
 #include "include/rtt_debug.h"
 #include "include/ipc.h"
 #include "include/exception.h"
-#ifdef QCOM_AON
-#include "../aon/include/aon_sensor_core.h"
+#ifdef SLT_ENABLE
+#include "../slt/include/slt.h"
 #endif
 
 int sdio_clock = 50000000;
@@ -590,6 +590,11 @@ pbl_out:
 		case IOC_NR_WRITE_DATA:
 		{
 			struct explorer_training_data data_info;
+			if (param_size > sizeof(struct explorer_training_data)) {
+				pr_err("%s, ioctl param size (%d) exceeds the limit (%d).\n", __func__,
+					param_size, sizeof(struct explorer_training_data));
+				return -EINVAL;
+			}
 			ret = copy_from_user(&data_info, (char __user *)(arg), param_size);
 			if (ret) {
 				pr_err("%s, can not copy explorer_data from user.\n", __func__);
@@ -597,6 +602,11 @@ pbl_out:
 			}
 			pr_info("%s, IOC_NR_WRITE_DATA get writing data size:%u.\n", __func__, data_info.len);
 			training_data_size = data_info.len;
+			if (training_data_size > TRAINING_DATA_BUF_SIZE) {
+				pr_err("%s, ioctl training size (%d) exceeds the limit (%d).\n", __func__,
+					training_data_size, TRAINING_DATA_BUF_SIZE);
+				return -EINVAL;
+			}
 			ret = copy_from_user(training_data_buf, data_info.addr, data_info.len);
 			if (ret) {
 				pr_err("%s, can not copy explorer_data from user.\n", __func__);
@@ -608,6 +618,11 @@ pbl_out:
 		case IOC_NR_BOOT:
 		{
 			struct explorer_boot_info boot_info;
+			if (param_size > sizeof(struct explorer_boot_info)) {
+				pr_err("%s, ioctl param size (%d) exceeds the limit (%d).\n", __func__,
+					param_size, sizeof(struct explorer_boot_info));
+				return -EINVAL;
+			}
 			ret = copy_from_user(&boot_info, (char __user *)(arg), param_size);
 			if (ret) {
 				pr_err("%s, can not copy explorer_boot_info from user.\n", __func__);
@@ -748,6 +763,11 @@ ln_out:
 		case IOC_NR_PBL_MIPI_BP:
 		{
 			struct mipi_params_t mpara;
+			if (param_size > sizeof(struct mipi_params_t)) {
+				pr_err("%s, ioctl param size (%d) exceeds the limit (%d).\n", __func__,
+					param_size, sizeof(struct mipi_params_t));
+				return -EINVAL;
+			}
 			ret = copy_from_user(&mpara, (char __user *)(arg), param_size);
 			if (ret) {
 				pr_err("%s, can not copy mipi_params_t from user.\n", __func__);
@@ -769,6 +789,11 @@ ln_out:
 		case IOC_NR_BOOT_CONTINUE:
 		{
 			struct explorer_boot_info_override bio;
+			if (param_size > sizeof(struct explorer_boot_info_override)) {
+				pr_err("%s, ioctl param size (%d) exceeds the limit (%d).\n", __func__,
+					param_size, sizeof(struct explorer_boot_info_override));
+				return -EINVAL;
+			}
 			ret = copy_from_user(&bio, (char __user *)(arg), param_size);
 			if (ret) {
 				pr_err("%s, can not copy explorer_boot_info_override from user.\n", __func__);
@@ -855,6 +880,16 @@ ln_out:
 					}
 					break;
 				}
+#ifdef SLT_ENABLE
+				case POWER_IOC_SDIO_VDD_ON:
+					PM_LOG_I("calling SDIO_VDD_ON, for slt test.\n");
+					ret = regulator_control_explorer(epd, true);
+					break;
+				case POWER_IOC_SDIO_VDD_OFF:
+					PM_LOG_I("calling SDIO_VDD_OFF, for slt test.\n");
+					ret = regulator_control_explorer(epd, false);
+					break;
+#endif
 				default:
 					PM_LOG_E("%s, info: 0x%x not support.\n", __func__, info);
 			}
@@ -874,6 +909,11 @@ power_out:
 			long lp2timeout = 1 * HZ;
 			long dumptimeout = 1 * HZ;
 
+			if (param_size > sizeof(struct RttSdiMsg)) {
+				pr_err("%s, ioctl param size (%d) exceeds the limit (%d).\n", __func__,
+						param_size, sizeof(struct RttSdiMsg));
+				return -EINVAL;
+			}
 			ret = copy_from_user(&sdi_msg, (char __user *)(arg), param_size);
 			if (ret) {
 				pr_err("[RAMDUMP] %s, can't copy RttSdiMsg from user.\n", __func__);
@@ -895,6 +935,11 @@ power_out:
 					return -EINVAL;
 				}
 
+				if ((sdi_msg.datasize) > sizeof(bool)) {
+					pr_err("%s, ioctl param size (%d) exceeds the limit (%d).\n", __func__,
+							param_size, sizeof(bool));
+					return -EINVAL;
+				}
 				ret = copy_from_user(&enable, (char __user *)(sdi_msg.data), sdi_msg.datasize);
 				if (ret) {
 					pr_err("[RAMDUMP] %s,can't copy RttSdiMsg.data from user.\n", __func__);
@@ -933,6 +978,11 @@ power_out:
 					return -EINVAL;
 				}
 
+				if ((sdi_msg.datasize) > sizeof(int)) {
+					pr_err("%s, ioctl param size (%d) exceeds the limit (%d).\n", __func__,
+							param_size, sizeof(int));
+					return -EINVAL;
+				}
 				ret = copy_from_user(&dump_type, (char __user *)(sdi_msg.data), sdi_msg.datasize);
 				if (ret) {
 					pr_err("[RAMDUMP] %s,can't copy RttSdiMsg.data from user.\n", __func__);
@@ -1049,6 +1099,11 @@ power_out:
 			}
 
 			if (sdi_msg.subtype == SDI_RAM_DUMP) {
+				if ((sdi_msg.datasize) > sizeof(struct RttRamDumpMsg)) {
+					pr_err("%s, ioctl param size (%d) exceeds the limit (%d).\n", __func__,
+							param_size, sizeof(struct RttRamDumpMsg));
+					return -EINVAL;
+				}
 				ret = copy_from_user(&dump_msg, (char __user *)(sdi_msg.data), sdi_msg.datasize);
 				if (ret) {
 					pr_err("[RAMDUMP]%s,can't copy RttRamDumpMsg info from user.\n", __func__);
@@ -1392,8 +1447,58 @@ syssts_out:
 			devm_kfree(dev, data);
 			break;
 		}
-#ifndef ZEKU_EXPLORER_PLATFORM_RPI
-#ifdef QCOM_AON
+#ifdef SLT_ENABLE
+		case IOC_NR_SLT:
+		{
+			void *data = NULL;
+			char *slt_command = NULL;
+			struct explorer_slt_msg_header *slt_header = NULL;
+			size_t slt_command_length = 0;
+			if (param_size >= EXPLORER_IOC_LEN_MAX) {
+				pr_err("%s, ioctl param size exceeds max length.\n", __func__);
+				return -EINVAL;
+			}
+			data = devm_kzalloc(dev, param_size + 1, GFP_KERNEL);
+			if (!data) {
+				pr_err("%s, alloc memory failed.\n", __func__);
+				return -ENOMEM;
+			}
+			ret = copy_from_user(data, (char __user *)arg, param_size);
+			if (ret) {
+				pr_err("%s, can not copy explorer_data from user, ret = 0x%x.\n", __func__, ret);
+				goto slt_out;
+			}
+			slt_command = (char *)data + sizeof(struct explorer_slt_msg_header);
+			slt_header = (struct explorer_slt_msg_header *)data;
+			epd->ebs.start_jiffies = jiffies;
+			slt_command_length = param_size - sizeof(struct explorer_slt_msg_header);
+			slt_command[slt_command_length] = '\0';
+			ret = explorer_slt_dispatch(epd, slt_command, slt_header->type, slt_command_length + 1);
+			if (ret < 0) {
+				pr_err("%s, explorer_slt_dispatch failed, ret = %d\n", __func__, ret);
+				goto slt_out;
+			}
+			pr_debug("%s, read IOC_NR_SLT done.\n", __func__);
+slt_out:
+			devm_kfree(dev, data);
+			break;
+		}
+		case IOC_NR_SLT_WAIT_FW:
+		{
+			struct explorer_slt_fw slt_fw;
+			ret = copy_from_user((void *)&slt_fw, (char __user *)arg, sizeof(slt_fw));
+			if (ret) {
+				pr_err("%s, can not copy explorer_slt_fw from user, ret = 0x%x.\n", __func__, ret);
+				break;
+			}
+			/* TODO: wait slt firmware */
+			ret = wait_firmware_on(epd, &slt_fw);
+			pr_info("%s, slt firmware type: %d, ret = %d.\n", __func__, slt_fw.type, ret);
+			break;
+		}
+#endif
+
+#if defined (QCOM_AON) || defined(MTK_AON)
 		case IOC_NR_CAM_CONTROL:
 		{
 			void *data = NULL;
@@ -1426,7 +1531,6 @@ syssts_out:
 			pr_info("%s data mm-kfree", __func__);
 			break;
 		}
-#endif
 #endif
 		default:
 			pr_info("%s, execute test ioctl.\n", __func__);
@@ -2625,6 +2729,10 @@ static ssize_t explorer_sdio_bin_load_store(struct device *pdev,
 	struct explorer_plat_data *epd = dev_get_drvdata(pdev);
 
 	memset(fw, 0, 128);
+	if (count >= 128) {
+		pr_err("%s, parameter buffer count exceeds the limitation.\n", __func__);
+		return -EINVAL;
+	}
 	memcpy(buf, buff, count);
 	sptr = buf;
 	buf[127] = '\0';
@@ -2669,6 +2777,8 @@ static void explorer_parse_tstg(struct explorer_plat_data *epd, char *tstg)
 		epd->ebi.target_stage = NPU_OK;
 	else if (strstr(tstg, "PBL_PROV"))
 		epd->ebi.target_stage = PBL_PROV;
+	else if (strstr(tstg, "PBL_SLT"))
+		epd->ebi.target_stage = PBL_SLT;
 	else
 		epd->ebi.target_stage = OS_OK;
 }
@@ -2732,6 +2842,10 @@ static ssize_t explorer_sdio_boot_store(struct device *pdev,
 	memset(pmod, 0, 16);
 	memset(mbuf, 0, 16);
 
+	if (count >= 128) {
+		pr_err("%s, parameter buffer count exceeds the limitation.\n", __func__);
+		return -EINVAL;
+	}
 	memcpy(buf, buff, count);
 	sptr = buf;
 	buf[127] = '\0';
@@ -2866,6 +2980,10 @@ static ssize_t explorer_continue_boot_store(struct device *pdev,
 	memset(rmod, 0, 16);
 	memset(rpos, 0, 16);
 
+	if (count >= 128) {
+		pr_err("%s, parameter buffer count exceeds the limitation.\n", __func__);
+		return -EINVAL;
+	}
 	memcpy(buf, buff, count);
 	sptr = buf;
 	buf[127] = '\0';
@@ -3489,6 +3607,20 @@ static int explorer_parse_clocks(struct explorer_plat_data *plat_priv)
 static int explorer_parse_regulators(struct explorer_plat_data *plat_priv)
 {
 	int ret = 0;
+
+#ifndef ZEKU_EXPLORER_PLATFORM_RPI
+#ifdef SLT_ENABLE
+	struct device *dev = &(plat_priv->plat_dev->dev);
+
+	plat_priv->vcc_sdio = regulator_get(dev, "vcc_sdio");
+	if (IS_ERR(plat_priv->vcc_sdio)) {
+		pr_err("%s:No vcc_sdio regulator found\n",__func__);
+		// temporary set to 0, need fix
+		ret = 0;
+	}
+#endif
+#endif
+
 	return ret;
 }
 
@@ -3498,6 +3630,9 @@ static int explorer_parse_cc_drive_strength(struct explorer_plat_data *plat_priv
 	struct device *dev = &(plat_priv->plat_dev->dev);
 	struct device_node *np = dev->of_node;
 	u32 cmd_drive_strength = 0, data_drive_strength = 0, clk_drive_strength = 0;
+#ifdef OPLUS_EXPLORER_NO_PROJECT
+	u32 spmi_drive_strength = 0;
+#endif
 
 	if (of_property_read_u32(np, "explorer,clk-drive-strength", &clk_drive_strength) == 0)
 		plat_priv->cc_clk_drive_strength = clk_drive_strength;
@@ -3518,6 +3653,18 @@ static int explorer_parse_cc_drive_strength(struct explorer_plat_data *plat_priv
 		pr_err("%s, failed to parse explorer data drive strength", __func__);
 		return -EINVAL;
 	}
+
+#ifdef OPLUS_EXPLORER_NO_PROJECT
+	if (of_property_read_u32(np, "explorer,spmi-drive-strength", &spmi_drive_strength) == 0) {
+        //add mask to tell cc set spmi_drive_strength directly, ignore project_id
+		plat_priv->project_id = spmi_drive_strength | 0xFFFF0;
+	}
+	else {
+		pr_err("%s, failed to parse explorer spmi drive strength", __func__);
+		return -EINVAL;
+	}
+#endif
+
 	return ret;
 }
 
@@ -3669,7 +3816,11 @@ static int explorer_probe(struct platform_device *plat_dev)
 	plat_priv->cspi = NULL;
 	plat_priv->sdio_data = NULL;
 	plat_priv->plat_dev = plat_dev;
+#ifndef OPLUS_EXPLORER_NO_PROJECT
 	plat_priv->project_id = explorer_get_project();
+#else
+	plat_priv->project_id = 0;
+#endif
 	plat_priv->cc_clk_drive_strength = 0;
 	plat_priv->cc_cmd_drive_strength = 0;
 	plat_priv->cc_data_drive_strength = 0;
@@ -3688,6 +3839,9 @@ static int explorer_probe(struct platform_device *plat_dev)
 	atomic_set(&plat_priv->is_ddr_failed, 0);
 	plat_priv->heartbeat_started = false;
 	INIT_DELAYED_WORK(&plat_priv->heartbeat_detect_work, heartbeat_detect_delayed_work);
+#ifdef SLT_ENABLE
+	plat_priv->is_vcc_sdio_on = false;
+#endif
 	plat_priv->est.sdio_tuning_status = -TUNING_BEGIN;
 	mutex_init(&plat_priv->power_sync_lock);
 	init_completion(&plat_priv->sleep_completion);
@@ -3746,6 +3900,12 @@ static int explorer_probe(struct platform_device *plat_dev)
 		goto err_sysfs_remove_group;
 	}
 
+	ret = power_reload_pmic_otp(plat_priv);
+	if (ret) {
+		pr_err("%s, failed to reload pmic otp, err:%d.\n", __func__, ret);
+		goto err_sysfs_remove_group;
+	}
+
 	/* init ipc */
 	ret = explorer_init_ipc(plat_priv);
 	if (ret) {
@@ -3776,6 +3936,10 @@ static int explorer_probe(struct platform_device *plat_dev)
 	thermal_zone_device_register("zeku_explorer",
 		 0, 0, (void*)plat_priv, &explorer_thermal_zone_ops, NULL, 0, 0);
 
+#ifdef SLT_ENABLE
+	/* init slt */
+	explorer_sdio_slt_test_case_init();
+#endif
 	pr_info("%s, done.\n", __func__);
 	return 0;
 
@@ -3811,6 +3975,9 @@ static int explorer_remove(struct platform_device *plat_dev)
 
 	explorer_cspi_exit();
 	explorer_sdio_exit();
+
+	PM_LOG_I("shutdown Explorer power&clock when remove\n");
+	power_clock_control_explorer(plat_priv, false);
 
 	misc_deregister(&plat_priv->dev);
 	sysfs_remove_group(&plat_priv->explorer_dev->kobj,

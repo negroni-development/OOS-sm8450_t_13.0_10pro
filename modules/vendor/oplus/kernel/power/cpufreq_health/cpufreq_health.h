@@ -73,4 +73,4 @@ void get_cpufreq_health_info(int *cnt, struct cpufreq_health_info *val);
 static inline void get_cpufreq_health_info(int *cnt, struct cpufreq_health_info *val) {}
 #endif
 
-#endif
+#endif /* _CPUFREQ_HEALTH_H */

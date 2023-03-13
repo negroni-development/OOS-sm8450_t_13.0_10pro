@@ -20,12 +20,12 @@ struct dynamic_boost_pool {
 	char *name;
 	struct list_head list;
 	int low, high, origin;
+	pid_t camera_pid;
 	struct task_struct *tsk, *prefill_tsk;
 	unsigned int wait_flag, prefill_wait_flag;
 	wait_queue_head_t waitq, prefill_waitq;
 	bool force_stop, prefill;
 	struct mutex prefill_mutex;
-	struct proc_dir_entry *proc_info, *proc_low_info, *proc_stat;
 #ifdef CONFIG_QCOM_DMABUF_HEAPS_SYSTEM
 	struct dynamic_page_pool **pools;
 #else

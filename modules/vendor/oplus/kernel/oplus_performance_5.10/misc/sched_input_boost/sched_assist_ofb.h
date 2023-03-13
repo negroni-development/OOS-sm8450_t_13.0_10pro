@@ -70,8 +70,21 @@ struct ofb_ctrl_data {
 	int64_t fpsNs;
 	int64_t vsyncNs;
 	int continuousDropFrames;
+	int util_min;
+	int util_max;
+	int boost_freq;
+	int boost_migr;
 };
 
+enum ofb_ctrl_extra_cmd_id {
+	SET_TASK_PREFERED_CLUSTER = 1
+};
+
+struct ofb_ctrl_cluster {
+	pid_t tid;
+	int cluster_id;
+	char reserved[32];
+};
 
 #define OFB_MAGIC 0XDE
 #define CMD_ID_SET_FPS \
@@ -88,3 +101,6 @@ struct ofb_ctrl_data {
 		_IOWR(OFB_MAGIC, IS_HWUI_RT, struct ofb_ctrl_data)
 #define CMD_ID_SET_TASK_TAGGING \
 		_IOWR(OFB_MAGIC, SET_TASK_TAGGING, struct ofb_ctrl_data)
+
+#define CMD_ID_SET_TASK_PREFERED_CLUSTER \
+		_IOWR(OFB_MAGIC, SET_TASK_PREFERED_CLUSTER, struct ofb_ctrl_cluster)

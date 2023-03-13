@@ -1284,13 +1284,20 @@ unsigned long get_nr_zram_total(void)
 	return nr_zram ?: 1;
 }
 
-static inline unsigned long hybridswap_get_zram_used_pages(void)
+u64 get_hybridswap_meminfo(const char *type)
 {
-	if (swapd_zram)
-		return atomic64_read(&swapd_zram->stats.pages_stored);
+	if (!type || !swapd_zram)
+		return 0;
 
+	if (!strcmp(type, "same_pages"))
+		return (u64)atomic64_read(&swapd_zram->stats.same_pages);
+	if (!strcmp(type, "compr_data_size"))
+		return (u64)atomic64_read(&swapd_zram->stats.compr_data_size);
+	if (!strcmp(type, "pages_stored"))
+		return (u64)atomic64_read(&swapd_zram->stats.pages_stored);
 	return 0;
 }
+EXPORT_SYMBOL(get_hybridswap_meminfo);
 
 bool zram_watermark_ok(void)
 {

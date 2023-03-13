@@ -35,7 +35,7 @@
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
 #endif
 
-#define SENSOR_DRIVER_I2C "i2c_camera"
+#define SENSOR_DRIVER_I2C "cam-i2c-sensor"
 #define CAMX_SENSOR_DEV_NAME "cam-sensor-driver"
 
 enum cam_sensor_state_t {
@@ -138,6 +138,9 @@ struct cam_sensor_ctrl_t {
 	enum cam_sensor_setting_state  sensor_initsetting_state;
 	struct task_struct             *sensor_open_thread;
 	int                            sensor_for_project;
+	bool                           use_rdi_sof_apply;  //lanhe add for explorer latency mipi tx.
+	struct work_struct             aon_wq;
+	int                            pid;
 #endif
 
 };

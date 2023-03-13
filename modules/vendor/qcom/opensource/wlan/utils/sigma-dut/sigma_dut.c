@@ -2,7 +2,7 @@
  * Sigma Control API DUT (station/AP)
  * Copyright (c) 2010-2011, Atheros Communications, Inc.
  * Copyright (c) 2011-2017, Qualcomm Atheros, Inc.
- * Copyright (c) 2018-2019, The Linux Foundation
+ * Copyright (c) 2018-2021, The Linux Foundation
  * All Rights Reserved.
  * Licensed under the Clear BSD license. See README for more details.
  */
@@ -857,6 +857,9 @@ static void set_defaults(struct sigma_dut *dut)
 	dut->user_config_ap_ocvc = -1;
 	dut->ap_sae_commit_status = -1;
 	dut->sta_async_twt_supp = -1;
+#ifdef ANDROID
+	dut->dscp_use_iptables = 1;
+#endif /* ANDROID */
 }
 
 
@@ -951,7 +954,7 @@ static const char * const license1 =
 "\n"
 "Copyright (c) 2010-2011, Atheros Communications, Inc.\n"
 "Copyright (c) 2011-2017, Qualcomm Atheros, Inc.\n"
-"Copyright (c) 2018-2019, The Linux Foundation\n"
+"Copyright (c) 2018-2021, The Linux Foundation\n"
 "All Rights Reserved.\n"
 "Licensed under the Clear BSD license.\n"
 "\n";
@@ -1319,6 +1322,7 @@ int main(int argc, char *argv[])
 
 #ifdef NL80211_SUPPORT
 	sigma_dut.nl_ctx = nl80211_init(&sigma_dut);
+	get_wiphy_capabilities(&sigma_dut);
 #endif /* NL80211_SUPPORT */
 	sigma_dut_register_cmds();
 

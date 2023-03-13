@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
+ * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -34,10 +35,21 @@ struct oplus_brightness_alpha {
 #define MAX_BL_LEVEL 4096
 #define MAX_BL_SCALE_LEVEL 1024
 #define MAX_SV_BL_SCALE_LEVEL 65535
+#define SV_BL_SCALE_CAP (MAX_SV_BL_SCALE_LEVEL * 4)
 #define DSI_CMD_PPS_SIZE 135
 
 #define DSI_CMD_PPS_HDR_SIZE 7
 #define DSI_MODE_MAX 32
+
+#define DSI_IS_FSC_PANEL(fsc_rgb_order) \
+		(((!strcmp(fsc_rgb_order, "fsc_rgb")) || \
+		(!strcmp(fsc_rgb_order, "fsc_rbg")) || \
+		(!strcmp(fsc_rgb_order, "fsc_bgr")) || \
+		(!strcmp(fsc_rgb_order, "fsc_brg")) || \
+		(!strcmp(fsc_rgb_order, "fsc_gbr")) || \
+		(!strcmp(fsc_rgb_order, "fsc_grb"))))
+
+#define FSC_MODE_LABEL_SIZE	8
 
 /*
  * Defining custom dsi msg flag.
@@ -153,6 +165,9 @@ struct dsi_panel_oplus_privite {
 	u32 dc_apollo_sync_brightness_level;
 	u32 dc_apollo_sync_brightness_level_pcc;
 	u32 dc_apollo_sync_brightness_level_pcc_min;
+	int iris_pw_enable;
+	int iris_pw_rst_gpio;
+	int iris_pw_0p9_en_gpio;
 };
 
 struct dsi_panel_oplus_serial_number {
@@ -175,6 +190,8 @@ struct dsi_backlight_config {
 	u32 bl_normal_max_level;
 	u32 brightness_normal_max_level;
 	u32 brightness_default_level;
+	u32 dc_backlight_threshold;
+	bool oplus_dc_mode;
 #endif /* OPLUS_BUG_STABILITY */
 
 	/* current brightness value */
@@ -296,6 +313,8 @@ struct dsi_panel {
 	u32 num_timing_nodes;
 	u32 num_display_modes;
 
+	char fsc_rgb_order[FSC_MODE_LABEL_SIZE];
+
 	struct dsi_regulator_info power_info;
 	struct dsi_backlight_config bl_config;
 	struct dsi_panel_reset_config reset_config;
@@ -333,12 +352,8 @@ struct dsi_panel {
 
 	struct dsi_panel_ops panel_ops;
 #ifdef OPLUS_BUG_STABILITY
-	bool is_hbm_enabled;
-	/* Fix aod flash problem */
 	bool need_power_on_backlight;
-	struct oplus_brightness_alpha *ba_seq;
 	struct oplus_brightness_alpha *dc_ba_seq;
-	int ba_count;
 	int dc_ba_count;
 	struct dsi_panel_oplus_privite oplus_priv;
 	struct dsi_panel_oplus_serial_number oplus_ser;

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -122,7 +123,7 @@ hdd_world_regrules_67_68_6A_6C = {
 	}
 };
 
-#define OSIF_PSOC_SYNC_OP_WAIT_TIME 500
+#define COUNTRY_CHANGE_WORK_RESCHED_WAIT_TIME 30
 /**
  * hdd_get_world_regrules() - get the appropriate world regrules
  * @reg: regulatory data
@@ -209,6 +210,50 @@ void hdd_reset_global_reg_params(void)
 	init_by_reg_core = false;
 }
 
+/**
+ * hdd_update_coex_unsafe_chan_nb_user_prefer() - update coex unsafe
+ * nb prefer framework
+ * @hdd_ctx: hdd context
+ * @config_vars: reg config
+ *
+ * Return: void
+ */
+#ifdef FEATURE_WLAN_CH_AVOID_EXT
+static inline
+void hdd_update_coex_unsafe_chan_nb_user_prefer(
+		struct hdd_context *hdd_ctx,
+		struct reg_config_vars *config_vars)
+{
+	config_vars->coex_unsafe_chan_nb_user_prefer =
+		ucfg_mlme_get_coex_unsafe_chan_nb_user_prefer(
+		hdd_ctx->psoc);
+}
+
+static inline
+void hdd_update_coex_unsafe_chan_reg_disable(
+		struct hdd_context *hdd_ctx,
+		struct reg_config_vars *config_vars)
+{
+	config_vars->coex_unsafe_chan_reg_disable =
+		ucfg_mlme_get_coex_unsafe_chan_reg_disable(
+		hdd_ctx->psoc);
+}
+#else
+static inline
+void hdd_update_coex_unsafe_chan_nb_user_prefer(
+		struct hdd_context *hdd_ctx,
+		struct reg_config_vars *config_vars)
+{
+}
+
+static inline
+void hdd_update_coex_unsafe_chan_reg_disable(
+		struct hdd_context *hdd_ctx,
+		struct reg_config_vars *config_vars)
+{
+}
+#endif
+
 static void reg_program_config_vars(struct hdd_context *hdd_ctx,
 				    struct reg_config_vars *config_vars)
 {
@@ -274,6 +319,10 @@ static void reg_program_config_vars(struct hdd_context *hdd_ctx,
 						    &enable_5dot9_ghz_chan);
 	config_vars->enable_5dot9_ghz_chan_in_master_mode =
 						enable_5dot9_ghz_chan;
+	hdd_update_coex_unsafe_chan_nb_user_prefer(hdd_ctx, config_vars);
+	hdd_update_coex_unsafe_chan_reg_disable(hdd_ctx, config_vars);
+	config_vars->sta_sap_scc_on_indoor_channel =
+		ucfg_policy_mgr_get_sta_sap_scc_on_indoor_chnl(hdd_ctx->psoc);
 }
 
 /**
@@ -455,15 +504,19 @@ static void hdd_process_regulatory_data(struct hdd_context *hdd_ctx,
 	struct ieee80211_channel *wiphy_chan, *wiphy_chan_144 = NULL;
 	struct regulatory_channel *cds_chan;
 	uint8_t band_capability, indoor_chnl_marking = 0;
-	bool indoor;
+	bool indoor, sta_sap_con_on_indoor;
 	QDF_STATUS status;
 
 	band_capability = hdd_ctx->curr_band;
 
 	status = ucfg_policy_mgr_get_indoor_chnl_marking(hdd_ctx->psoc,
 							 &indoor_chnl_marking);
+
 	if (QDF_STATUS_SUCCESS != status)
 		hdd_err("can't get indoor channel marking, using default");
+
+	 sta_sap_con_on_indoor =
+		 ucfg_policy_mgr_get_sta_sap_scc_on_indoor_chnl(hdd_ctx->psoc);
 
 	for (band_num = 0; band_num < HDD_NUM_NL80211_BANDS; band_num++) {
 
@@ -518,8 +571,9 @@ static void hdd_process_regulatory_data(struct hdd_context *hdd_ctx,
 					cds_chan->state = CHANNEL_STATE_DFS;
 					wiphy_chan->flags |=
 						IEEE80211_CHAN_PASSIVE_SCAN;
-					cds_chan->chan_flags |=
-						REGULATORY_CHAN_NO_IR;
+					if (!sta_sap_con_on_indoor)
+						cds_chan->chan_flags |=
+							REGULATORY_CHAN_NO_IR;
 				} else
 					cds_chan->state = CHANNEL_STATE_ENABLE;
 			} else
@@ -1197,6 +1251,7 @@ void hdd_ch_avoid_ind(struct hdd_context *hdd_ctxt,
 {
 	uint16_t *local_unsafe_list;
 	uint16_t local_unsafe_list_count;
+	uint32_t restriction_mask;
 	uint8_t i;
 
 	/* Basic sanity */
@@ -1210,6 +1265,7 @@ void hdd_ch_avoid_ind(struct hdd_context *hdd_ctxt,
 			sizeof(struct ch_avoid_ind_type));
 	mutex_unlock(&hdd_ctxt->avoid_freq_lock);
 
+	restriction_mask = wlan_hdd_get_restriction_mask(hdd_ctxt);
 	if (hdd_clone_local_unsafe_chan(hdd_ctxt,
 					&local_unsafe_list,
 					&local_unsafe_list_count) != 0) {
@@ -1223,6 +1279,8 @@ void hdd_ch_avoid_ind(struct hdd_context *hdd_ctxt,
 					sizeof(hdd_ctxt->unsafe_channel_list));
 
 	hdd_ctxt->unsafe_channel_count = unsafe_chan_list->chan_cnt;
+
+	wlan_hdd_set_restriction_mask(hdd_ctxt);
 
 	for (i = 0; i < unsafe_chan_list->chan_cnt; i++) {
 		hdd_ctxt->unsafe_channel_list[i] =
@@ -1267,7 +1325,8 @@ void hdd_ch_avoid_ind(struct hdd_context *hdd_ctxt,
 	}
 	if (hdd_local_unsafe_channel_updated(hdd_ctxt,
 					    local_unsafe_list,
-					    local_unsafe_list_count))
+					    local_unsafe_list_count,
+					    restriction_mask))
 		hdd_unsafe_channel_restart_sap(hdd_ctxt);
 	qdf_mem_free(local_unsafe_list);
 
@@ -1562,10 +1621,14 @@ static void hdd_country_change_update_sta(struct hdd_context *hdd_ctx)
 								    adapter,
 								    oper_freq);
 
-			if (phy_changed || freq_changed || width_changed) {
+			if (hdd_is_vdev_in_conn_state(adapter) &&
+			    (phy_changed || freq_changed || width_changed)) {
+				hdd_debug("changed: phy %d, freq %d, width %d",
+					  phy_changed, freq_changed,
+					  width_changed);
 				wlan_hdd_cm_issue_disconnect(adapter,
-							 REASON_UNSPEC_FAILURE,
-							 false);
+							REASON_UNSPEC_FAILURE,
+							false);
 				sta_ctx->reg_phymode = csr_phy_mode;
 			}
 			break;
@@ -1636,8 +1699,8 @@ static void hdd_restart_sap_with_new_phymode(struct hdd_context *hdd_ctx,
 		hdd_err("SAP Start Bss fail");
 		return;
 	}
-	status = qdf_wait_for_event_completion(&hostapd_state->qdf_event,
-					       SME_CMD_START_BSS_TIMEOUT);
+	status = qdf_wait_single_event(&hostapd_state->qdf_event,
+				       SME_CMD_START_BSS_TIMEOUT);
 	if (!QDF_IS_STATUS_SUCCESS(status)) {
 		mutex_unlock(&hdd_ctx->sap_lock);
 		hdd_err("SAP Start timeout");
@@ -1751,7 +1814,7 @@ static void hdd_country_change_work_handle(void *arg)
 	errno = osif_psoc_sync_op_start(wiphy_dev(hdd_ctx->wiphy), &psoc_sync);
 
 	if (errno == -EAGAIN) {
-		qdf_sleep(OSIF_PSOC_SYNC_OP_WAIT_TIME);
+		qdf_sleep(COUNTRY_CHANGE_WORK_RESCHED_WAIT_TIME);
 		hdd_debug("rescheduling country change work");
 		qdf_sched_work(0, &hdd_ctx->country_change_work);
 		return;

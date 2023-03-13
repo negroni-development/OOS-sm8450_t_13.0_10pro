@@ -1,6 +1,6 @@
 config OPLUS_FEATURE_SENSOR_CFG
 	tristate "oplus sensor share memory config"
-	default n
+	default y
 	help
 	  To compile this driver as a module, set M in kernel build config
 	  module will be called oplus_sensor.
@@ -14,3 +14,9 @@ config OPLUS_SENSOR_FB_QC
 	help
 	  To compile this driver as a module, set M in kernel build config
 	  module will be called sensor_feedback.
+
+config OPLUS_SENSOR_CONSUMER_IR_QC
+	tristate "sensor consumer ir config for qcom"
+	help
+	  To compile this driver as a module, set m in kernel build config
+	  module will be called kookong_ir_spi.

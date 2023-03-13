@@ -23,13 +23,18 @@
 #include "dsi_pwr.h"
 #include "sde_dbg.h"
 
+#define PANEL_LOADING_EFFECT_FLAG 100
+#define PANEL_LOADING_EFFECT_MODE1 101
+#define PANEL_LOADING_EFFECT_MODE2 102
+#define PANEL_LOADING_EFFECT_OFF 100
+
+int oplus_display_get_seed_mode(void);
 int oplus_display_panel_get_seed(void *data);
 int oplus_display_panel_set_seed(void *data);
-int oplus_dsi_update_seed_mode(void);
+int oplus_dsi_update_seed_mode(struct dsi_display *display);
 int __oplus_display_set_seed(int mode);
 int dsi_panel_seed_mode(struct dsi_panel *panel, int mode);
 int dsi_panel_seed_mode_unlock(struct dsi_panel *panel, int mode);
 int dsi_display_seed_mode(struct dsi_display *display, int mode);
 
-void oplus_ofp_handle_display_effect(struct dsi_display *display, int hbm_status);
 #endif

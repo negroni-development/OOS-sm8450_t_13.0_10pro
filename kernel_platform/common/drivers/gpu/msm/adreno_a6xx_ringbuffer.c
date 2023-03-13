@@ -61,11 +61,30 @@ static int a6xx_rb_context_switch(struct adreno_device *adreno_dev,
 		adreno_drawctxt_get_pagetable(drawctxt);
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	int count = 0;
-	u32 cmds[36];
+	u32 cmds[41];
 
-	if (adreno_drawctxt_get_pagetable(rb->drawctxt_active) != pagetable)
+	if (adreno_drawctxt_get_pagetable(rb->drawctxt_active) != pagetable) {
+
+		/* Clear performance counters during context switches */
+		if (!adreno_dev->perfcounter) {
+			cmds[count++] = cp_type4_packet(A6XX_RBBM_PERFCTR_SRAM_INIT_CMD, 1);
+			cmds[count++] = 0x1;
+		}
+
 		count += a6xx_rb_pagetable_switch(adreno_dev, rb, drawctxt,
-			pagetable, cmds);
+			pagetable, &cmds[count]);
+
+		/* Wait for performance counter clear to finish */
+		if (!adreno_dev->perfcounter) {
+			cmds[count++] = cp_type7_packet(CP_WAIT_REG_MEM, 6);
+			cmds[count++] = 0x3;
+			cmds[count++] = A6XX_RBBM_PERFCTR_SRAM_INIT_STATUS;
+			cmds[count++] = 0x0;
+			cmds[count++] = 0x1;
+			cmds[count++] = 0x1;
+			cmds[count++] = 0x0;
+		}
+	}
 
 	cmds[count++] = cp_type7_packet(CP_NOP, 1);
 	cmds[count++] = CONTEXT_TO_MEM_IDENTIFIER;
@@ -86,14 +105,6 @@ static int a6xx_rb_context_switch(struct adreno_device *adreno_dev,
 
 	cmds[count++] = cp_type7_packet(CP_EVENT_WRITE, 1);
 	cmds[count++] = 0x31;
-
-	if (adreno_is_preemption_enabled(adreno_dev)) {
-		u64 gpuaddr = drawctxt->base.user_ctxt_record->memdesc.gpuaddr;
-
-		cmds[count++] = cp_type7_packet(CP_SET_PSEUDO_REGISTER, 3);
-		cmds[count++] = SET_PSEUDO_NON_PRIV_SAVE_ADDR;
-		count += cp_gpuaddr(adreno_dev, &cmds[count], gpuaddr);
-	}
 
 	return a6xx_ringbuffer_addcmds(adreno_dev, rb, NULL, F_NOTPROTECTED,
 			cmds, count, 0, NULL);
@@ -198,7 +209,7 @@ int a6xx_ringbuffer_init(struct adreno_device *adreno_dev)
 	return 0;
 }
 
-#define A6XX_SUBMIT_MAX 75
+#define A6XX_SUBMIT_MAX 79
 
 int a6xx_ringbuffer_addcmds(struct adreno_device *adreno_dev,
 		struct adreno_ringbuffer *rb, struct adreno_context *drawctxt,
@@ -237,7 +248,7 @@ int a6xx_ringbuffer_addcmds(struct adreno_device *adreno_dev,
 	cmds[index++] = cp_type7_packet(CP_NOP, 1);
 	cmds[index++] = drawctxt ? CMD_IDENTIFIER : CMD_INTERNAL_IDENTIFIER;
 
-	/* This is 21 dwords when drawctxt is not NULL */
+	/* This is 25 dwords when drawctxt is not NULL and perfcounter needs to be zapped */
 	index += a6xx_preemption_pre_ibsubmit(adreno_dev, rb, drawctxt,
 		&cmds[index]);
 
@@ -437,7 +448,7 @@ int a6xx_ringbuffer_submitcmd(struct adreno_device *adreno_dev,
 			numibs++;
 	}
 
-	cmds = kmalloc((A6XX_COMMAND_DWORDS + (numibs * 5)) << 2, GFP_KERNEL);
+	cmds = kvmalloc((A6XX_COMMAND_DWORDS + (numibs * 5)) << 2, GFP_KERNEL);
 	if (!cmds) {
 		ret = -ENOMEM;
 		goto done;
@@ -528,6 +539,6 @@ done:
 	trace_kgsl_issueibcmds(device, drawctxt->base.id, numibs,
 		drawobj->timestamp, drawobj->flags, ret, drawctxt->type);
 
-	kfree(cmds);
+	kvfree(cmds);
 	return ret;
 }

@@ -29,7 +29,6 @@
 #include "oplus_display_panel_seed.h"
 #include "oplus_display_panel_common.h"
 #include "oplus_ffl.h"
-#include "oplus_aod.h"
 #include "oplus_dc_diming.h"
 #include "oplus_adfr.h"
 
@@ -92,11 +91,12 @@ struct softiris_color
 	uint32_t color_softiris_status;
 	uint32_t color_dual_panel_status;
 	uint32_t color_dual_brightness_status;
+	uint32_t color_oplus_calibrate_status;
 };
 
 /*oplus ioctl case start*/
 #define PANEL_COMMOND_BASE 0x00
-#define PANEL_COMMOND_MAX  0x5F
+#define PANEL_COMMOND_MAX  0x66
 
 #define PANEL_IOCTL_SET_POWER					PANEL_IOWR(0x01, struct panel_vol_set)
 #define PANEL_IOCTL_GET_POWER					PANEL_IOWR(0x02, struct panel_vol_get)
@@ -145,7 +145,8 @@ struct softiris_color
 #define PANEL_IOCTL_GET_LCM_CABC              PANEL_IOWR(0x2D, unsigned int)
 #define PANEL_IOCTL_SET_AOD_AREA              PANEL_IOW(0x2E, unsigned int)
 #define PANEL_IOCTL_GET_OPLUS_MAXBRIGHTNESS   PANEL_IOWR(0x2F, unsigned int)
-
+#define PANEL_IOCTL_SET_ULTRA_LOW_POWER_AOD	PANEL_IOW(0x33, unsigned int)
+#define PANEL_IOCTL_GET_ULTRA_LOW_POWER_AOD	PANEL_IOWR(0x34, unsigned int)
 #define PANEL_IOCTL_SET_APOLLO_BACKLIGHT			PANEL_IOW(0x51, struct apollo_backlight_map_value)
 #define PANEL_IOCTL_GET_SOFTIRIS_COLOR				PANEL_IOWR(0x53, struct softiris_color)
 #define PANEL_IOCTL_SET_DITHER_STATUS				PANEL_IOWR(0x54, unsigned int)
@@ -159,6 +160,8 @@ struct softiris_color
 #define PANEL_IOCTL_GET_DRE_STATUS			PANEL_IOWR(0x5C, unsigned int)
 #define PANEL_IOCTL_SET_DYNAMIC_TE			PANEL_IOWR(0x5D, unsigned int)
 #define PANEL_IOCTL_GET_DYNAMIC_TE			PANEL_IOWR(0x5E, unsigned int)
+#define PANEL_IOCTL_SET_FP_TYPE				PANEL_IOW(0x64, unsigned int)
+#define PANEL_IOCTL_GET_FP_TYPE				PANEL_IOWR(0x65, unsigned int)
 /*oplus ioctl case end*/
 
 int oplus_display_panel_init(void);

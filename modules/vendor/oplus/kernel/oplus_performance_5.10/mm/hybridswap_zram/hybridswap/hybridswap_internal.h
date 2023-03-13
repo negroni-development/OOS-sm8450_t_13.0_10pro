@@ -481,6 +481,7 @@ extern int hybridswap_batch_out(struct mem_cgroup *mcg,
 extern unsigned long zram_zsmalloc(struct zs_pool *zs_pool,
 		size_t size, gfp_t gfp);
 extern struct task_struct *get_task_from_proc(struct inode *inode);
+extern unsigned long hybridswap_get_zram_used_pages(void);
 extern unsigned long long hybridswap_get_zram_pagefault(void);
 extern bool hybridswap_reclaim_work_running(void);
 extern void hybridswap_force_reclaim(struct mem_cgroup *mcg);
@@ -501,6 +502,11 @@ extern int hybridswap_psi_show(struct seq_file *m, void *v);
 #else
 static inline unsigned long long hybridswap_read_mcg_stats(
         struct mem_cgroup *mcg, enum hybridswap_mcg_member mcg_member)
+{
+	return 0;
+}
+
+static inline unsigned long hybridswap_get_zram_used_pages(void)
 {
 	return 0;
 }

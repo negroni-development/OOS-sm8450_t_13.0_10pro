@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -930,6 +931,8 @@ static bool scm_is_bss_allowed_for_country(struct wlan_objmgr_psoc *psoc,
 
 	if (wlan_reg_is_6ghz_chan_freq(scan_entry->channel.chan_freq)) {
 		cc_ie = util_scan_entry_country(scan_entry);
+		if (!cc_ie)
+			return false;
 		wlan_reg_read_current_country(psoc, programmed_country);
 		if (cc_ie && qdf_mem_cmp(cc_ie->cc, programmed_country,
 					 REG_ALPHA2_LEN)) {
@@ -1118,7 +1121,13 @@ QDF_STATUS __scm_handle_bcn_probe(struct scan_bcn_probe_event *bcn)
 		if (scan_obj->cb.update_beacon)
 			scan_obj->cb.update_beacon(pdev, scan_entry);
 
-		if (!scm_is_bss_allowed_for_country(psoc, scan_entry)) {
+		/**
+		 * Do not drop the frame if Wi-Fi safe mode or RF test mode is
+		 * enabled. wlan_cm_get_check_6ghz_security API returns true if
+		 * neither Safe mode nor RF test mode are enabled.
+		 */
+		if (!scm_is_bss_allowed_for_country(psoc, scan_entry) &&
+		    wlan_cm_get_check_6ghz_security(psoc)) {
 			scm_info_rl(
 				"Drop frame from "QDF_MAC_ADDR_FMT
 				": AP in VLP mode not supported for US",

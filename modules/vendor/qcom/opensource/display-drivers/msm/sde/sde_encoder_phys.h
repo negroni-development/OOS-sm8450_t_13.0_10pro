@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -134,6 +135,7 @@ struct sde_encoder_virt_ops {
  * @get_underrun_line_count:	Obtain and log current internal vertical line
  *                              count and underrun line count
  * @add_to_minidump:		Add this phys_enc data to minidumps
+ * @disable_autorefresh:	Disable autorefresh
  */
 
 struct sde_encoder_phys_ops {
@@ -146,7 +148,7 @@ struct sde_encoder_phys_ops {
 			struct drm_display_mode *adjusted_mode);
 	void (*mode_set)(struct sde_encoder_phys *encoder,
 			struct drm_display_mode *mode,
-			struct drm_display_mode *adjusted_mode);
+			struct drm_display_mode *adjusted_mode, bool *reinit_mixers);
 	void (*cont_splash_mode_set)(struct sde_encoder_phys *encoder,
 			struct drm_display_mode *adjusted_mode);
 	void (*enable)(struct sde_encoder_phys *encoder);
@@ -187,6 +189,7 @@ struct sde_encoder_phys_ops {
 			struct msm_display_info *disp_info);
 	u32 (*get_underrun_line_count)(struct sde_encoder_phys *phys);
 	void (*add_to_minidump)(struct sde_encoder_phys *phys);
+	void (*disable_autorefresh)(struct sde_encoder_phys *phys);
 };
 
 /**

@@ -15,8 +15,6 @@
  * These values were determined empirically and shows good E2E bi-
  * directional throughputs
  */
-#define IPA_HOLB_TMR_EN 0x1
-#define IPA_HOLB_TMR_DIS 0x0
 #define IPA_POLL_AGGR_STATE_RETRIES_NUM 3
 #define IPA_POLL_AGGR_STATE_SLEEP_USEC_MIN 1010
 #define IPA_POLL_AGGR_STATE_SLEEP_USEC_MAX 1050
@@ -27,7 +25,7 @@
 #define IPA_POLL_FOR_EMPTINESS_SLEEP_USEC 20
 #define IPA_CHANNEL_STOP_IN_PROC_TO_MSEC 5
 #define IPA_CHANNEL_STOP_IN_PROC_SLEEP_USEC 200
-
+#define IPA_MAX_HOLB_TMR_VAL (4294967296 - 1)
 /* xfer_rsc_idx should be 7 bits */
 #define IPA_XFER_RSC_IDX_MAX 127
 
@@ -71,6 +69,16 @@ int ipa3_enable_data_path(u32 clnt_hdl)
 				(ep->client == IPA_CLIENT_MHI_QDSS_CONS)) {
 			holb_cfg.en = IPA_HOLB_TMR_EN;
 			holb_cfg.tmr_val = 0;
+		} else if (ipa3_ctx->ipa_hw_type == IPA_HW_v4_11 &&
+				(ep->client == IPA_CLIENT_WLAN1_CONS ||
+				ep->client == IPA_CLIENT_WLAN2_CONS ||
+				 ep->client == IPA_CLIENT_USB_CONS)) {
+			holb_cfg.en = IPA_HOLB_TMR_EN;
+			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
+		} else if (ipa3_ctx->ipa_hw_type == IPA_HW_v3_0 &&
+				ep->client == IPA_CLIENT_USB_CONS) {
+			holb_cfg.en = IPA_HOLB_TMR_EN;
+			holb_cfg.tmr_val = IPA_MAX_HOLB_TMR_VAL;
 		} else if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_1 &&
 			ipa3_ctx->platform_type == IPA_PLAT_TYPE_APQ &&
 			ep->client == IPA_CLIENT_USB_CONS) {
@@ -296,7 +304,8 @@ static void ipa3_start_gsi_debug_monitor(u32 clnt_hdl)
 	/* start uC gsi dbg stats monitor */
 	if (ipa3_ctx->ipa_hw_type >= IPA_HW_v4_5 &&
 		ipa3_ctx->ipa_hw_type != IPA_HW_v4_7 &&
-		ipa3_ctx->ipa_hw_type != IPA_HW_v4_11) {
+		ipa3_ctx->ipa_hw_type != IPA_HW_v4_11 &&
+		ipa3_ctx->ipa_hw_type != IPA_HW_v5_2) {
 		switch (client_type) {
 		case IPA_CLIENT_MHI_PRIME_TETH_PROD:
 			gsi_info = &ipa3_ctx->gsi_info[IPA_HW_PROTOCOL_MHIP];

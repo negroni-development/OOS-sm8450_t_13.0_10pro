@@ -85,5 +85,30 @@ int oplus_panel_event_notification_trigger(struct dsi_display *display, enum pan
 
 EXPORT_SYMBOL(oplus_panel_event_notification_trigger);
 
+int oplus_display_event_data_notifier_trigger(struct dsi_display *display,
+		enum panel_event_notifier_tag panel_type,
+		enum panel_event_notification_type notif_type,
+		u32 data)
+{
+	struct drm_panel *panel = dsi_display_get_drm_panel(display);
+	struct panel_event_notification notifier;
+
+	if (!panel) {
+		pr_err("[%s] invalid panel\n", __func__);
+		return -EINVAL;
+	}
+
+	memset(&notifier, 0, sizeof(notifier));
+
+	notifier.panel = panel;
+	notifier.notif_type = notif_type;
+	notifier.notif_data.early_trigger = true;
+	notifier.notif_data.data = data;
+
+	panel_event_notification_trigger(panel_type, &notifier);
+	return 0;
+}
+EXPORT_SYMBOL(oplus_display_event_data_notifier_trigger);
+
 MODULE_LICENSE("GPL v2");
 //#endif /* VENDOR_EDIT */

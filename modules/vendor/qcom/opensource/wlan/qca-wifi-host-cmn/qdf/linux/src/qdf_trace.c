@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -29,6 +30,7 @@
 #include <qdf_module.h>
 #include <qdf_util.h>
 #include <qdf_mem.h>
+#include <soc/oplus/system/oplus_project.h>
 
 /* macro to map qdf trace levels into the bitmask */
 #define QDF_TRACE_LEVEL_TO_MODULE_BITMASK(_level) ((1 << (_level)))
@@ -1803,6 +1805,26 @@ uint8_t qdf_eapol_get_key_type(uint8_t *data, enum qdf_proto_subtype subtype)
 }
 
 /**
+ * qdf_skip_wlan_connectivity_log() - Check if connectivity log need to skip
+ * @type: Protocol type
+ * @subtype: Protocol subtype
+ * @dir: Rx or Tx
+ *
+ * Return: true or false
+ */
+static inline
+bool qdf_skip_wlan_connectivity_log(enum qdf_proto_type type,
+				    enum qdf_proto_subtype subtype,
+				    enum qdf_proto_dir dir)
+{
+	if ((dir == QDF_RX) && (type == QDF_PROTO_TYPE_DHCP) &&
+	    ((subtype == QDF_PROTO_DHCP_DISCOVER) ||
+	     (subtype == QDF_PROTO_DHCP_REQUEST)))
+		return true;
+	return false;
+}
+
+/**
  * qdf_fill_wlan_connectivity_log() - Fill and queue protocol packet to logging
  * the logging queue
  * @type: Protocol type
@@ -1821,10 +1843,14 @@ void qdf_fill_wlan_connectivity_log(enum qdf_proto_type type,
 				    enum qdf_dp_tx_rx_status qdf_tx_status,
 				    uint8_t vdev_id, uint8_t *data)
 {
-	struct wlan_log_record log_buf;
+	struct wlan_log_record log_buf = {0};
 	uint8_t pkt_type;
 
+	if (qdf_skip_wlan_connectivity_log(type, subtype, dir))
+		return;
+
 	log_buf.timestamp_us = qdf_get_time_of_the_day_ms() * 1000;
+	log_buf.ktime_us = qdf_ktime_to_us(qdf_ktime_get());
 	log_buf.vdev_id = vdev_id;
 	if (type == QDF_PROTO_TYPE_DHCP) {
 		log_buf.log_subtype = qdf_subtype_to_wlan_main_tag(subtype);
@@ -1838,6 +1864,8 @@ void qdf_fill_wlan_connectivity_log(enum qdf_proto_type type,
 		} else if (pkt_type == EAPOL_PACKET_TYPE_KEY) {
 			log_buf.log_subtype = qdf_eapol_get_key_type(data,
 								     subtype);
+		} else {
+			return;
 		}
 	} else {
 		return;
@@ -3392,6 +3420,7 @@ struct category_name_info g_qdf_category_name[MAX_SUPPORTED_CATEGORY] = {
 	[QDF_MODULE_ID_MBSS] = {"MBSS"},
 	[QDF_MODULE_ID_MON] = {"MONITOR"},
 	[QDF_MODULE_ID_AFC] = {"AFC"},
+	[QDF_MODULE_ID_TWT] = {"TWT"},
 	[QDF_MODULE_ID_ANY] = {"ANY"},
 };
 qdf_export_symbol(g_qdf_category_name);
@@ -3965,6 +3994,7 @@ static void set_default_trace_levels(struct category_info *cinfo)
 		[QDF_MODULE_ID_MBSS] = QDF_TRACE_LEVEL_ERROR,
 		[QDF_MODULE_ID_MON] = QDF_TRACE_LEVEL_ERROR,
 		[QDF_MODULE_ID_MGMT_RX_REO] = QDF_TRACE_LEVEL_ERROR,
+		[QDF_MODULE_ID_TWT] = QDF_TRACE_LEVEL_ERROR,
 		[QDF_MODULE_ID_ANY] = QDF_TRACE_LEVEL_INFO,
 	};
 
@@ -4386,11 +4416,16 @@ qdf_export_symbol(qdf_get_pidx);
 #ifdef CONFIG_SLUB_DEBUG
 void __qdf_bug(void)
 {
-//#ifndef OPLUS_BUG_DEBUG
+//#ifndef OPLUS_BUG_STABILITY
+//modify for: close bug in user build
 //	BUG();
-//#else
-pr_info("bingham %s: need to enter into wlan dump, but skip as WAR.\n", __func__);
-//#endif /* OPLUS_BUG_DEBUG */
+//#else /* OPLUS_BUG_STABILITY */
+	if (AGING == get_eng_version()) {
+		BUG();
+	} else {
+		WARN_ON(1);
+	}
+//#endif /* OPLUS_BUG_STABILITY */
 }
 qdf_export_symbol(__qdf_bug);
 #endif /* CONFIG_SLUB_DEBUG */

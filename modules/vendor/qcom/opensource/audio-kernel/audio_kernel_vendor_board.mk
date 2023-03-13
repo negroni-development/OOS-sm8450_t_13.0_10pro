@@ -50,5 +50,5 @@ endif
 endif
 
 #ifdef OPLUS_ARCH_EXTENDS
--include $(TOP)/vendor/oplus/kernel/audio/oplus_audio_kernel_vendor_board.mk
+-include $(TOP)/vendor/qcom/opensource/audio-kernel/oplus/oplus_audio_kernel_vendor_board.mk
 #endif /* OPLUS_ARCH_EXTENDS */

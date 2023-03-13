@@ -861,6 +861,7 @@ bool dsi_display_mode_match(const struct dsi_display_mode *mode1,
 		struct dsi_display_mode *mode2, unsigned int match_flags);
 
 #ifdef OPLUS_BUG_STABILITY
+/* add oplus_panel_event_notification_trigger */
 /**
  * oplus_panel_event_notification_trigger() - display notifi
  * @display:       dsi_display to be compared
@@ -868,5 +869,20 @@ bool dsi_display_mode_match(const struct dsi_display_mode *mode1,
  * Return: Zero on Success
  */
 int oplus_panel_event_notification_trigger(struct dsi_display *display, enum panel_event_notification_type notif_type);
+
+/* add oplus_display_event_data_notifier_trigger */
+/**
+ * oplus_display_event_data_notifier_trigger() - oplus event notification with data
+ * @display:                       Point to dsi_display
+ * @panel_event_notifier_tag:      Type of panel
+ * @panel_event_notification_type: Type of notifier
+ * @data:                          Data to be notified
+ * Return: Zero on Success
+ */
+int oplus_display_event_data_notifier_trigger(struct dsi_display *display,
+		enum panel_event_notifier_tag panel_type,
+		enum panel_event_notification_type notif_type,
+		u32 data);
+
 #endif /* OPLUS_BUG_STABILITY */
 #endif /* _DSI_DISPLAY_H_ */

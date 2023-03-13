@@ -14,7 +14,11 @@
 #include <linux/mutex.h>
 #include "dsi_display.h"
 #include "oplus_dsi_support.h"
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
 #include "oplus_onscreenfingerprint.h"
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
+
 /*#include "oplus_mm_kevent_fb.h"*/
 
 
@@ -26,6 +30,7 @@
 #define FFL_EXIT_CONTROL 0
 #define FFL_TRIGGLE_CONTROL 1
 #define FFL_EXIT_FULLY_CONTROL 2
+#define FFL_FP_LEVEL 150
 
 bool oplus_ffl_trigger_finish = true;
 bool ffl_work_running = false;
@@ -123,12 +128,17 @@ void oplus_ffl_setting_thread(struct kthread_work *work)
 			break;
 		}
 
-		/*
-		 * On Onscreenfingerprint mode, max backlight level should be FFL_FP_LEVEL
-		 */
-		if (display->panel->is_hbm_enabled && index > FFL_FP_LEVEL) {
-			break;
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+		if (oplus_ofp_is_supported() && !oplus_ofp_oled_capacitive_is_enabled()
+				&& !oplus_ofp_ultrasonic_is_enabled()) {
+			/*
+			* max backlight level should be FFL_FP_LEVEL in hbm state
+			*/
+			if (oplus_ofp_get_hbm_state() && index > FFL_FP_LEVEL) {
+				break;
+			}
 		}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 		mutex_lock(&display->panel->panel_lock);
 		dsi_panel_set_backlight(display->panel, index);

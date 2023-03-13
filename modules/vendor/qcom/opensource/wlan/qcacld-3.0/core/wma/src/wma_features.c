@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -636,7 +636,7 @@ QDF_STATUS wma_process_dhcp_ind(WMA_HANDLE handle,
 					    &peer_set_param_fp);
 }
 
-#if defined(WLAN_FEATURE_11BE) && defined(CFG80211_11BE_BASIC)
+#if defined(WLAN_FEATURE_11BE)
 static enum wlan_phymode
 wma_eht_chan_phy_mode(uint32_t freq, uint8_t dot11_mode, uint16_t bw_val,
 		      enum phy_ch_width chan_width)
@@ -1252,7 +1252,8 @@ int wma_csa_offload_handler(void *handle, uint8_t *event, uint32_t len)
 	}
 
 	qdf_mem_zero(csa_offload_event, sizeof(*csa_offload_event));
-	qdf_mem_copy(csa_offload_event->bssId, &bssid, QDF_MAC_ADDR_SIZE);
+	qdf_copy_macaddr(&csa_offload_event->bssid,
+			 (struct qdf_mac_addr *)bssid);
 
 	if (csa_event->ies_present_flag & WMI_CSA_IE_PRESENT) {
 		csa_ie = (struct ieee80211_channelswitch_ie *)
@@ -1262,6 +1263,7 @@ int wma_csa_offload_handler(void *handle, uint8_t *event, uint32_t len)
 			wlan_reg_legacy_chan_to_freq(wma->pdev,
 						     csa_ie->newchannel);
 		csa_offload_event->switch_mode = csa_ie->switchmode;
+		csa_offload_event->ies_present_flag |= MLME_CSA_IE_PRESENT;
 	} else if (csa_event->ies_present_flag & WMI_XCSA_IE_PRESENT) {
 		xcsa_ie = (struct ieee80211_extendedchannelswitch_ie *)
 						(&csa_event->xcsa_ie[0]);
@@ -1278,6 +1280,7 @@ int wma_csa_offload_handler(void *handle, uint8_t *event, uint32_t len)
 				wlan_reg_legacy_chan_to_freq
 					(wma->pdev, xcsa_ie->newchannel);
 		}
+		csa_offload_event->ies_present_flag |= MLME_XCSA_IE_PRESENT;
 	} else {
 		wma_err("CSA Event error: No CSA IE present");
 		qdf_mem_free(csa_offload_event);
@@ -1290,6 +1293,7 @@ int wma_csa_offload_handler(void *handle, uint8_t *event, uint32_t len)
 		csa_offload_event->new_ch_width = wb_ie->new_ch_width;
 		csa_offload_event->new_ch_freq_seg1 = wb_ie->new_ch_freq_seg1;
 		csa_offload_event->new_ch_freq_seg2 = wb_ie->new_ch_freq_seg2;
+		csa_offload_event->ies_present_flag |= MLME_WBW_IE_PRESENT;
 	} else if (csa_event->ies_present_flag &
 		   WMI_CSWRAP_IE_EXTENDED_PRESENT) {
 		wb_ie = (struct ieee80211_ie_wide_bw_switch *)
@@ -1303,16 +1307,18 @@ int wma_csa_offload_handler(void *handle, uint8_t *event, uint32_t len)
 			csa_offload_event->new_ch_freq_seg2 =
 						wb_ie->new_ch_freq_seg2;
 			csa_event->ies_present_flag |= WMI_WBW_IE_PRESENT;
+			csa_offload_event->ies_present_flag |=
+				MLME_WBW_IE_PRESENT;
 		}
+		csa_offload_event->ies_present_flag |=
+			MLME_CSWRAP_IE_EXTENDED_PRESENT;
 	}
 
-	csa_offload_event->ies_present_flag = csa_event->ies_present_flag;
-
 	wma_debug("CSA: BSSID "QDF_MAC_ADDR_FMT" chan %d freq %d flag 0x%x width = %d freq1 = %d freq2 = %d op class = %d",
-		 QDF_MAC_ADDR_REF(csa_offload_event->bssId),
+		 QDF_MAC_ADDR_REF(csa_offload_event->bssid.bytes),
 		 csa_offload_event->channel,
 		 csa_offload_event->csa_chan_freq,
-		 csa_event->ies_present_flag,
+		 csa_offload_event->ies_present_flag,
 		 csa_offload_event->new_ch_width,
 		 csa_offload_event->new_ch_freq_seg1,
 		 csa_offload_event->new_ch_freq_seg2,
@@ -1637,6 +1643,10 @@ static const uint8_t *wma_wow_wake_reason_str(A_INT32 wake_reason)
 		return "TWT Event";
 	case WOW_REASON_DCS_INT_DET:
 		return "DCS_INT_DET";
+	case WOW_REASON_ROAM_STATS:
+		return "ROAM_STATS";
+	case WOW_REASON_RTT_11AZ:
+		return "WOW_REASON_RTT_11AZ";
 	default:
 		return "unknown";
 	}
@@ -2209,7 +2219,7 @@ static void wma_log_pkt_ipv6(uint8_t *data, uint32_t length)
 		 ip_addr[9], ip_addr[10], ip_addr[11],
 		 ip_addr[12], ip_addr[13], ip_addr[14],
 		 ip_addr[15]);
-#endif /* OPLUS_BUG_DEBUG */
+#endif /* OPLUS_CNSS_POWER_DEBUG */
 	ip_addr = (char *)(data + IPV6_DST_ADDR_OFFSET);
 #ifndef OPLUS_CNSS_POWER_DEBUG
 	wma_nofl_debug("dst addr "IPV6_ADDR_STR, ip_addr[0],
@@ -2225,7 +2235,7 @@ static void wma_log_pkt_ipv6(uint8_t *data, uint32_t length)
 		 ip_addr[9], ip_addr[10], ip_addr[11],
 		 ip_addr[12], ip_addr[13], ip_addr[14],
 		 ip_addr[15]);
-#endif /* OPLUS_BUG_DEBUG */
+#endif /* OPLUS_CNSS_POWER_DEBUG */
 	src_port = *(uint16_t *)(data + IPV6_SRC_PORT_OFFSET);
 	dst_port = *(uint16_t *)(data + IPV6_DST_PORT_OFFSET);
 	wma_info("Pkt_len: %u, src_port: %u, dst_port: %u",
@@ -2615,8 +2625,8 @@ static int wma_wake_event_packet(
 	case WOW_REASON_RA_MATCH:
 	case WOW_REASON_RECV_MAGIC_PATTERN:
 	case WOW_REASON_PACKET_FILTER_MATCH:
-		wma_debug("Wake event packet:");
-		qdf_trace_hex_dump(QDF_MODULE_ID_WMA, QDF_TRACE_LEVEL_DEBUG,
+		wma_info("Wake event packet:");
+		qdf_trace_hex_dump(QDF_MODULE_ID_WMA, QDF_TRACE_LEVEL_INFO,
 				   packet, packet_len);
 
 		vdev = &wma->interfaces[wake_info->vdev_id];
@@ -2658,6 +2668,8 @@ static int wma_wake_event_no_payload(
 		return wma_wake_reason_nlod(wma, wake_info->vdev_id);
 
 	case WOW_REASON_GENERIC_WAKE:
+	case WOW_REASON_ROAM_STATS:
+	case WOW_REASON_RTT_11AZ:
 		wma_info("Wake reason %s",
 			 wma_wow_wake_reason_str(wake_info->wake_reason));
 		return 0;
@@ -3695,8 +3707,8 @@ int wma_update_tdls_peer_state(WMA_HANDLE handle,
 		goto end_tdls_peer_state;
 	}
 
-	if (MLME_IS_ROAM_SYNCH_IN_PROGRESS(wma_handle->psoc,
-					   peer_state->vdev_id)) {
+	if (wlan_cm_is_roam_sync_in_progress(wma_handle->psoc,
+					     peer_state->vdev_id)) {
 		wma_err("roaming in progress, reject peer update cmd!");
 		ret = -EPERM;
 		goto end_tdls_peer_state;

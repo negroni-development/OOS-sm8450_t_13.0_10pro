@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -17,6 +18,10 @@
 #include "../oplus/oplus_adfr.h"
 #include <soc/oplus/system/oplus_mm_kevent_fb.h>
 #endif
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+#include "../oplus/oplus_onscreenfingerprint.h"
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
 
 #define SDE_DEBUG_CMDENC(e, fmt, ...) SDE_DEBUG("enc%d intf%d " fmt, \
 		(e) && (e)->base.parent ? \
@@ -233,6 +238,13 @@ static void sde_encoder_phys_cmd_pp_tx_done_irq(void *arg, int irq_idx)
 
 	/* Signal any waiting atomic commit thread */
 	wake_up_all(&phys_enc->pending_kickoff_wq);
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported()) {
+		oplus_ofp_pressed_icon_status_update(phys_enc, OPLUS_OFP_PP_DONE);
+	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
+
 	SDE_ATRACE_END("pp_done_irq");
 }
 
@@ -336,6 +348,15 @@ static void sde_encoder_phys_cmd_te_rd_ptr_irq(void *arg, int irq_idx)
 
 	atomic_add_unless(&cmd_enc->pending_vblank_cnt, -1, 0);
 	wake_up_all(&cmd_enc->pending_vblank_wq);
+
+#ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
+	if (oplus_ofp_is_supported()) {
+		oplus_ofp_pressed_icon_status_update(phys_enc, OPLUS_OFP_RD_PTR);
+		oplus_ofp_panel_hbm_status_update(phys_enc);
+		oplus_ofp_notify_uiready(phys_enc);
+	}
+#endif /* OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT */
+
 	SDE_ATRACE_END("rd_ptr_irq");
 }
 
@@ -482,7 +503,7 @@ static void sde_encoder_phys_cmd_cont_splash_mode_set(
 static void sde_encoder_phys_cmd_mode_set(
 		struct sde_encoder_phys *phys_enc,
 		struct drm_display_mode *mode,
-		struct drm_display_mode *adj_mode)
+		struct drm_display_mode *adj_mode, bool *reinit_mixers)
 {
 	struct sde_encoder_phys_cmd *cmd_enc =
 		to_sde_encoder_phys_cmd(phys_enc);
@@ -503,8 +524,14 @@ static void sde_encoder_phys_cmd_mode_set(
 	/* Retrieve previously allocated HW Resources. Shouldn't fail */
 	sde_rm_init_hw_iter(&iter, phys_enc->parent->base.id, SDE_HW_BLK_CTL);
 	for (i = 0; i <= instance; i++) {
-		if (sde_rm_get_hw(rm, &iter))
+		if (sde_rm_get_hw(rm, &iter)) {
+			if (phys_enc->hw_ctl && phys_enc->hw_ctl != iter.hw) {
+				*reinit_mixers =  true;
+				SDE_EVT32(phys_enc->hw_ctl->idx,
+					((struct sde_hw_ctl *)iter.hw)->idx);
+			}
 			phys_enc->hw_ctl = (struct sde_hw_ctl *)iter.hw;
+		}
 	}
 
 	if (IS_ERR_OR_NULL(phys_enc->hw_ctl)) {
@@ -1985,23 +2012,19 @@ static void _sde_encoder_autorefresh_disable_seq2(
 	}
 }
 
-static void sde_encoder_phys_cmd_prepare_commit(
-		struct sde_encoder_phys *phys_enc)
+static void _sde_encoder_phys_disable_autorefresh(struct sde_encoder_phys *phys_enc)
 {
 	struct sde_encoder_phys_cmd *cmd_enc =
 		to_sde_encoder_phys_cmd(phys_enc);
 
-	if (!phys_enc)
+	if (!phys_enc || !sde_encoder_phys_cmd_is_master(phys_enc))
 		return;
 
-	if (!sde_encoder_phys_cmd_is_master(phys_enc))
+	if (!sde_encoder_phys_cmd_is_autorefresh_enabled(phys_enc))
 		return;
 
 	SDE_EVT32(DRMID(phys_enc->parent), phys_enc->intf_idx - INTF_0,
 			cmd_enc->autorefresh.cfg.enable);
-
-	if (!sde_encoder_phys_cmd_is_autorefresh_enabled(phys_enc))
-		return;
 
 	sde_encoder_phys_cmd_connect_te(phys_enc, false);
 	_sde_encoder_autorefresh_disable_seq1(phys_enc);
@@ -2009,6 +2032,11 @@ static void sde_encoder_phys_cmd_prepare_commit(
 	sde_encoder_phys_cmd_connect_te(phys_enc, true);
 
 	SDE_DEBUG_CMDENC(cmd_enc, "autorefresh disabled successfully\n");
+}
+
+static void sde_encoder_phys_cmd_prepare_commit(struct sde_encoder_phys *phys_enc)
+{
+	return _sde_encoder_phys_disable_autorefresh(phys_enc);
 }
 
 static void sde_encoder_phys_cmd_trigger_start(
@@ -2103,6 +2131,7 @@ static void sde_encoder_phys_cmd_init_ops(struct sde_encoder_phys_ops *ops)
 	ops->setup_misr = sde_encoder_helper_setup_misr;
 	ops->collect_misr = sde_encoder_helper_collect_misr;
 	ops->add_to_minidump = sde_encoder_phys_cmd_add_enc_to_minidump;
+	ops->disable_autorefresh = _sde_encoder_phys_disable_autorefresh;
 }
 
 static inline bool sde_encoder_phys_cmd_intf_te_supported(

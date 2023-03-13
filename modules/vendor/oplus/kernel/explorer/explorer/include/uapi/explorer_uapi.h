@@ -17,7 +17,7 @@
 #ifndef _EXPLORER_UAPI_H
 #define _EXPLORER_UAPI_H
 
-#ifdef QCOM_AON
+#if defined (QCOM_AON) || defined (MTK_AON)
 #include "../../../aon/include/aon_uapi.h"
 #endif
 
@@ -153,7 +153,7 @@ enum boot_stage {
 	BOOTROM,
 	PBL_NORMAL,
 	PBL_PROV,
-	PBL_RESERVED,
+	PBL_SLT,
 	MIPI_BP_OK,
 	DDR_OK,
 	OS_OK,
@@ -183,6 +183,10 @@ enum explorer_rtos_mode {
 	RTOS_DBG_NOPM,
 	RTOS_RLS_NOPM,
 /* Hidden definition for Android Hal, must be appended at the end */
+#ifdef SLT_ENABLE
+	RTOS_SLT,
+	RTOS_SLT_AON,
+#endif
 	RTOS_MAX
 };
 
@@ -238,6 +242,10 @@ enum explorer_os_type {
 	NORMAL_OS,
 	AON_OS,
 	PLAT_OS,
+#ifdef SLT_ENABLE
+	SLT_OS,
+	SLT_OS_AON,
+#endif
 };
 
 enum explorer_secure_state {
@@ -287,6 +295,11 @@ enum explorer_power_info {
 	POWER_IOC_STATE_LAST,
 	/* Power State Get */
 	POWER_IOC_STATE_GET,
+#ifdef SLT_ENABLE
+	/* SLT Test */
+	POWER_IOC_SDIO_VDD_ON,
+	POWER_IOC_SDIO_VDD_OFF,
+#endif
 };
 
 enum explor_ulog_ctl_info {
@@ -363,6 +376,10 @@ struct RttRamDumpMsg {
 #define IOC_NR_SYS_STATUS		(23)
 
 #define IOC_NR_GDB			(30)
+#ifdef SLT_ENABLE
+#define IOC_NR_SLT			(32)
+#define IOC_NR_SLT_WAIT_FW			(33)
+#endif
 
 #define	IOC_NR_ISP_WAIT			(64)
 #define	IOC_NR_CAMERA_WAIT			(65)
@@ -396,6 +413,11 @@ struct RttRamDumpMsg {
 #define EXPLORER_IOC_WRITE_DATA			__IOW(EXPLORER_IOC_MAGIC, IOC_NR_WRITE_DATA, struct explorer_training_data)
 #define EXPLORER_IOC_SOFT_RESET			__IOW(EXPLORER_IOC_MAGIC, IOC_NR_SOFT_RESET, 0)
 
+#ifdef SLT_ENABLE
+#define EXPLORER_IOC_SLT(size)			_IOC(_IOC_WRITE, EXPLORER_IOC_MAGIC, IOC_NR_SLT, size)
+#define EXPLORER_IOC_SLT_WF			_IOW(EXPLORER_IOC_MAGIC, IOC_NR_SLT_WAIT_FW, struct explorer_slt_fw)
+#endif
+
 #define	EXPLORER_IOC_ISP_WAIT			_IOW(EXPLORER_IOC_MAGIC, IOC_NR_ISP_WAIT, struct explorer_sync_msg)
 #define	EXPLORER_IOC_PBL			_IOW(EXPLORER_IOC_MAGIC, IOC_NR_PBL, struct explorer_pbl_info)
 
@@ -404,7 +426,7 @@ struct RttRamDumpMsg {
 
 #define	EXPLORER_IOC_READ_DUMP			_IOR(EXPLORER_IOC_MAGIC, IOC_NR_READDUMP, struct RttSdiMsg)
 
-#ifdef QCOM_AON
+#if defined (QCOM_AON) || defined (MTK_AON)
 #define	EXPLORER_IOC_CAM_CONTROL		_IOWR(EXPLORER_IOC_MAGIC, IOC_NR_CAM_CONTROL, struct aon_control)
 #endif
 

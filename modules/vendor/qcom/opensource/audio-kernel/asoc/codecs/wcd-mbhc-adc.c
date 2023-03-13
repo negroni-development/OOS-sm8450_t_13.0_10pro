@@ -1112,7 +1112,7 @@ correct_plug_type:
 			wrk_complete = true;
 			#ifdef OPLUS_ARCH_EXTENDS
 			high_hph_count++;
-			if ((high_hph_count == 5) && !headset_count && !headphone_count) {
+			if ((high_hph_count == HIGH_HPH_DETECT_RETRY_CNT) && !headset_count && !headphone_count) {
 				pr_info("%s: HIGH_HPH type, break loop detect\n", __func__);
 				break;
 			}
@@ -1361,7 +1361,8 @@ exit:
 
 	#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
 	if ((plug_type != MBHC_PLUG_TYPE_HEADSET) &&
-	    (plug_type != MBHC_PLUG_TYPE_HEADPHONE)) {
+	    (plug_type != MBHC_PLUG_TYPE_HEADPHONE) &&
+	    !((plug_type == MBHC_PLUG_TYPE_HIGH_HPH) && (retry == HIGH_HPH_DETECT_RETRY_CNT))) {
 		scnprintf(buf, sizeof(buf) - 1, "func@@%s$$plug_type@@%d$$output_mv@@%d$$retry@@%d",
 				__func__, plug_type, output_mv, retry);
 		upload_mm_fb_kevent_to_atlas_limit(OPLUS_AUDIO_EVENTID_HEADSET_DET, buf, MM_FB_KEY_RATELIMIT_1MIN);

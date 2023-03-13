@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2011-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -46,6 +47,9 @@
 #include "wlan_mlme_ucfg_api.h"
 #include "wlan_connectivity_logging.h"
 #include <lim_mlo.h>
+#include "parser_api.h"
+#include "wlan_action_oui_ucfg_api.h"
+#include "wlan_action_oui_public_struct.h"
 
 /**
  * lim_update_stads_htcap() - Updates station Descriptor HT capability
@@ -743,36 +747,6 @@ lim_update_iot_aggr_sz(struct mac_context *mac_ctx, uint8_t *ie_ptr,
 		pe_err("Failed to set iot amsdu size: %d", ret);
 }
 
-#ifdef WLAN_FEATURE_11BE_MLO
-static void lim_update_ml_partner_info(struct pe_session *session_entry,
-				       tpSirAssocRsp assoc_rsp)
-{
-	int i;
-	tDot11fIEmlo_ie ie;
-	struct mlo_partner_info partner_info;
-
-	if (!assoc_rsp || !session_entry)
-		return;
-
-	session_entry->ml_partner_info.num_partner_links =
-				     assoc_rsp->mlo_ie.mlo_ie.num_sta_profile;
-	ie = assoc_rsp->mlo_ie.mlo_ie;
-	partner_info = session_entry->ml_partner_info;
-
-	partner_info.num_partner_links = ie.num_sta_profile;
-	pe_err("copying partner info from join req to join rsp, num_partner_links %d",
-	       partner_info.num_partner_links);
-
-	for (i = 0; i < partner_info.num_partner_links; i++) {
-		partner_info.partner_link_info[i].link_id =
-			ie.sta_profile[i].link_id;
-		qdf_mem_copy(&partner_info.partner_link_info[i].link_addr,
-			     ie.sta_profile[i].sta_mac_addr.info.sta_mac_addr,
-			     QDF_MAC_ADDR_SIZE);
-	}
-}
-#endif
-
 /**
  * hdd_cm_update_mcs_rate_set() - Update MCS rate set from HT capability
  * @vdev: Pointer to vdev boject
@@ -870,6 +844,8 @@ lim_process_assoc_rsp_frame(struct mac_context *mac_ctx, uint8_t *rx_pkt_info,
 	QDF_STATUS status;
 	enum ani_akm_type auth_type;
 	bool sha384_akm;
+	bool bad_ap;
+	struct action_oui_search_attr attr = {0};
 
 	assoc_cnf.resultCode = eSIR_SME_SUCCESS;
 	/* Update PE session Id */
@@ -917,6 +893,8 @@ lim_process_assoc_rsp_frame(struct mac_context *mac_ctx, uint8_t *rx_pkt_info,
 		(session_entry->limMlmState != eLIM_MLM_WT_ASSOC_RSP_STATE)) ||
 		((subtype == LIM_REASSOC) &&
 		 !lim_is_roam_synch_in_progress(mac_ctx->psoc, session_entry) &&
+		 !MLME_IS_MLO_ROAM_SYNCH_IN_PROGRESS(mac_ctx->psoc,
+						     session_entry->vdev_id) &&
 		((session_entry->limMlmState != eLIM_MLM_WT_REASSOC_RSP_STATE)
 		&& (session_entry->limMlmState !=
 		eLIM_MLM_WT_FT_REASSOC_RSP_STATE)
@@ -1013,9 +991,10 @@ lim_process_assoc_rsp_frame(struct mac_context *mac_ctx, uint8_t *rx_pkt_info,
 			session_entry->assocRspLen = frame_len;
 		}
 	}
-#ifdef WLAN_FEATURE_11BE_MLO
-	lim_update_ml_partner_info(session_entry, assoc_rsp);
-#endif
+	dot11f_parse_assoc_rsp_mlo_partner_info(session_entry,
+						session_entry->assocRsp,
+						frame_len);
+
 	lim_update_ric_data(mac_ctx, session_entry, assoc_rsp);
 
 	lim_set_r0kh(assoc_rsp, session_entry);
@@ -1136,8 +1115,8 @@ lim_process_assoc_rsp_frame(struct mac_context *mac_ctx, uint8_t *rx_pkt_info,
 				&assoc_rsp->obss_scanparams);
 
 	if (lim_is_session_he_capable(session_entry))
-		mlme_set_twt_peer_capabilities(
-				mac_ctx->psoc,
+		lim_set_twt_peer_capabilities(
+				mac_ctx,
 				(struct qdf_mac_addr *)current_bssid,
 				&assoc_rsp->he_cap,
 				&assoc_rsp->he_op);
@@ -1317,8 +1296,25 @@ lim_process_assoc_rsp_frame(struct mac_context *mac_ctx, uint8_t *rx_pkt_info,
 	lim_update_assoc_sta_datas(mac_ctx, sta_ds, assoc_rsp,
 				   session_entry, beacon);
 
+	/*
+	 * One special AP sets MU EDCA timer as 255 wrongly in both beacon and
+	 * assoc rsp, lead to 2 sec SU upload data stall periodically.
+	 * To fix it, reset MU EDCA timer to 1 and config to F/W for such AP.
+	 */
 	if (lim_is_session_he_capable(session_entry)) {
+		attr.ie_data = ie;
+		attr.ie_length = ie_len;
+		bad_ap = ucfg_action_oui_search(mac_ctx->psoc,
+						&attr,
+						ACTION_OUI_DISABLE_MU_EDCA);
 		session_entry->mu_edca_present = assoc_rsp->mu_edca_present;
+		if (session_entry->mu_edca_present && bad_ap) {
+			pe_debug("IoT AP with bad mu edca timer, reset to 1");
+			assoc_rsp->mu_edca.acbe.mu_edca_timer = 1;
+			assoc_rsp->mu_edca.acbk.mu_edca_timer = 1;
+			assoc_rsp->mu_edca.acvi.mu_edca_timer = 1;
+			assoc_rsp->mu_edca.acvo.mu_edca_timer = 1;
+		}
 		if (session_entry->mu_edca_present) {
 			pe_debug("Save MU EDCA params to session");
 			session_entry->ap_mu_edca_params[QCA_WLAN_AC_BE] =

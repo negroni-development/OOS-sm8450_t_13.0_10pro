@@ -57,7 +57,7 @@ extern void vmalloc_debug_exit(void);
 #define CACHE_INDEX(index) ((index) % (KMALLOC_SHIFT_HIGH + 1))
 #define CACHE_TYPE(index) ((index) / (KMALLOC_SHIFT_HIGH + 1))
 
-extern int enable_vmalloc_debug(void);
+extern int init_vmalloc_debug(void);
 extern void disable_vmalloc_debug(void);
 extern void dump_kmalloc_debug_info(struct kmem_cache *s, int index,
 		char *dump_buff, int len);
@@ -197,7 +197,7 @@ struct proc_dir_entry *oplus_mem_dir;
 static void save_track_hash_hook(void *data, bool alloc, unsigned long addr)
 {
 	struct track *p = (struct track *)addr;
-	unsigned int hash;
+	unsigned int hash, nr_entries;
 
 	if (!p || (alloc == false))
 		return;
@@ -205,9 +205,14 @@ static void save_track_hash_hook(void *data, bool alloc, unsigned long addr)
 	if (!kmalloc_debug_enable)
 		return;
 
+	for (nr_entries = 0; nr_entries < TRACK_ADDRS_COUNT; nr_entries++) {
+		if (p->addrs[nr_entries] == 0)
+			break;
+	}
+
 	/* save the stack hash */
 	hash = jhash2((u32 *)p->addrs,
-			TRACK_ADDRS_COUNT * sizeof(unsigned long) / sizeof(u32),
+			nr_entries * sizeof(unsigned long) / sizeof(u32),
 			0xface);
 	set_track_hash(p, hash);
 }
@@ -1649,7 +1654,7 @@ void dump_kmalloc_debug_info(struct kmem_cache *s, int index, char *dump_buff,
 	dump_locations(s, slab_size, index, dump_buff, len, TRACK_ALLOC);
 }
 
-	static inline const char *
+static inline const char *
 kmalloc_debug_cache_name(const char *prefix, unsigned int size)
 {
 	static const char units[3] = "\0kM";
@@ -1661,6 +1666,23 @@ kmalloc_debug_cache_name(const char *prefix, unsigned int size)
 	}
 
 	return kasprintf(GFP_NOWAIT, "%s-%u%c", prefix, size, units[idx]);
+}
+
+static inline bool check_valid_size(int size, int type)
+{
+	int i;
+	struct kmem_cache *s;
+
+	for (i = 0; i <= KMALLOC_SHIFT_HIGH; i++) {
+		s = kmalloc_caches[type][i];
+		if (!s)
+			continue;
+
+		if (size == s->object_size)
+			return true;
+	}
+
+	return false;
 }
 
 static struct kmem_cache *create_kmalloc_debug_caches(size_t size,
@@ -1883,6 +1905,11 @@ static ssize_t kmalloc_debug_create_write(struct file *file, const char __user *
 	ret = kstrtol(kbuf+offset, 10, &size);
 	if (ret)
 		return -EINVAL;
+
+	if (!check_valid_size(size, type)) {
+		pr_err("kbuf %s slab size %ld is error\n", kbuf, size);
+		return -EINVAL;
+	}
 
 	index = kmalloc_index(size);
 	mutex_lock(&debug_mutex);
@@ -2203,7 +2230,7 @@ int __init create_kmalloc_debug(struct proc_dir_entry *parent)
 
 	mpentry = proc_create("memleak_detect_thread", S_IRUGO|S_IWUGO, parent,
 			&memleak_detect_thread_operations);
-	if (!cpentry) {
+	if (!mpentry) {
 		pr_err("create memleak_detect_thread_operations proc failed.\n");
 		goto remove_cpentry;
 	}
@@ -2485,7 +2512,7 @@ static int __init memleak_detect_init(void)
 			goto destroy_kmalloc_debug;
 		}
 
-		ret = enable_vmalloc_debug();
+		ret = init_vmalloc_debug();
 		if (ret)
 			goto destroy_kmalloc_debug;
 	}

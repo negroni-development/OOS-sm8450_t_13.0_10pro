@@ -22,6 +22,10 @@
 #include "include/uapi/explorer_uapi.h"
 #include "include/power.h"
 #include "include/exception.h"
+#ifdef SLT_ENABLE
+#include "../slt/include/slt.h"
+#include "../slt/include/slt_loader.h"
+#endif
 
 #ifndef USE_RAW_SDIO
 extern int explorer_hal_sync_read_internal(struct explorer_plat_data *epd,u32 regoffset, u8 *out);
@@ -322,11 +326,28 @@ int explorer_clear_pbl_log(struct explorer_plat_data *epd)
 	return ret;
 }
 void explorer_get_pbl_log_config(struct explorer_plat_data *epd, struct explorer_log_reply *reply) {
-	if ((atomic_read(&epd->ebs.current_stage) >= PBL_NORMAL)
-		&& (atomic_read(&epd->ebs.rtos_on) == 0)) {
-		reply->addr = NORMAL_PBL_LOG_ADDR;
-		reply->len = NORMAL_PBL_LOG_LEN;
+#ifdef SLT_ENABLE
+	if (epd->ebi.target_stage == PBL_SLT) {
+	#ifdef PBL_2nd
+		reply->addr = SLT_PBL_LOG_ADDR;
+		reply->len = SLT_PBL_LOG_LEN;
+	#endif
+	} else if ((epd->ebi.rmod == RTOS_SLT) || (epd->ebi.rmod == RTOS_SLT_AON)) {
+		if ((atomic_read(&epd->ebs.current_stage) < OS_OK)
+			&& (atomic_read(&epd->ebs.current_stage) >= PBL_NORMAL)) {
+			reply->addr = NORMAL_PBL_LOG_ADDR;
+			reply->len = NORMAL_PBL_LOG_LEN;
+		}
+	} else {
+#endif
+		if ((atomic_read(&epd->ebs.current_stage) >= PBL_NORMAL)
+			&& (atomic_read(&epd->ebs.rtos_on) == 0)) {
+			reply->addr = NORMAL_PBL_LOG_ADDR;
+			reply->len = NORMAL_PBL_LOG_LEN;
+		}
+#ifdef SLT_ENABLE
 	}
+#endif
 }
 
 int explorer_sdu_reg_config(struct explorer_plat_data *epd)
@@ -555,7 +576,20 @@ int explorer_load_se(struct explorer_plat_data *epd, unsigned long deadline)
 
 	time_tag(epd, "load-se-hdr start");
 
-	ret = explorer_load_fw(epd, SE_HEAD_NAME, FW_SE_HEAD_ADDR);
+#ifdef SLT_ENABLE
+	if(epd->ebi.target_stage == PBL_SLT
+		|| epd->ebi.rmod == RTOS_SLT
+		|| epd->ebi.rmod == RTOS_SLT_AON) {
+		ret = explorer_load_fw(epd, SE_HEAD_NAME, FW_SE_HEAD_ADDR);
+		if (ret < 0) {
+			ret = explorer_load_stl_se_header(epd);
+		}
+	} else {
+#endif
+		ret = explorer_load_fw(epd, SE_HEAD_NAME, FW_SE_HEAD_ADDR);
+#ifdef SLT_ENABLE
+	}
+#endif
 	if (ret < 0) {
 		AP_BOOT_ERR("load se header failed.\n");
 		return ret;
@@ -592,8 +626,21 @@ int explorer_load_se(struct explorer_plat_data *epd, unsigned long deadline)
 
 	/* load SE fw */
 	time_tag(epd, "load-se-fw start");
-	ret = explorer_load_fw(epd, SE_DATA_NAME, FW_SE_DATA_ADDR);
+#ifdef SLT_ENABLE
+	if(epd->ebi.target_stage == PBL_SLT
+		|| epd->ebi.rmod == RTOS_SLT
+		|| epd->ebi.rmod == RTOS_SLT_AON) {
+		ret = explorer_load_fw(epd, SE_DATA_NAME, FW_SE_DATA_ADDR);
 
+		if (ret < 0) {
+			ret = explorer_load_stl_se_fw(epd);
+		}
+	} else {
+#endif
+		ret = explorer_load_fw(epd, SE_DATA_NAME, FW_SE_DATA_ADDR);
+#ifdef SLT_ENABLE
+}
+#endif
 	if (ret < 0) {
 		AP_BOOT_ERR("load se fw failed\n");
 		return ret;
@@ -617,11 +664,21 @@ int explorer_load_sdi(struct explorer_plat_data *epd)
 
 	/* fws needed in both sec & non-sec boot */
 	time_tag(epd, "load-sdi start");
-	if (epd->ebs.is_cc_sec_boot) {
-		ret = explorer_load_fw(epd, SDI_SEC_NAME, FW_SDI_ADDR);
+#ifdef SLT_ENABLE
+	if(epd->ebi.target_stage == PBL_SLT
+		|| epd->ebi.rmod == RTOS_SLT
+		|| epd->ebi.rmod == RTOS_SLT_AON) {
+		ret = explorer_load_stl_sdi(epd);
 	} else {
-		ret = explorer_load_fw(epd, SDI_NAME, FW_SDI_ADDR);
+#endif
+		if (epd->ebs.is_cc_sec_boot) {
+			ret = explorer_load_fw(epd, SDI_SEC_NAME, FW_SDI_ADDR);
+		} else {
+			ret = explorer_load_fw(epd, SDI_NAME, FW_SDI_ADDR);
+		}
+#ifdef SLT_ENABLE
 	}
+#endif
 
 	if (ret == -R_FW_REQ_FAIL) {
 		AP_BOOT_ERR("No SDI FW.\n");
@@ -705,15 +762,28 @@ int explorer_load_pbl(struct explorer_plat_data *epd)
 	time_tag(epd, "load-pbl start");
 
 	switch (epd->ebi.target_stage) {
+#ifdef SLT_ENABLE
+		case PBL_SLT:
+			ret = explorer_load_stl_pbl(epd);
+			break;
+#endif
 		case PBL_PROV:
 			//do nothing
 			break;
 		default:
-			if (epd->ebs.is_cc_sec_boot) {
-				ret = explorer_load_fw(epd, PBL_SEC_NAME, FW_PBL_ADDR);
+#ifdef SLT_ENABLE
+			if(epd->ebi.rmod == RTOS_SLT || epd->ebi.rmod == RTOS_SLT_AON) {
+				ret = explorer_load_stl_normal_pbl(epd);
 			} else {
-				ret = explorer_load_fw(epd, PBL_NAME, FW_PBL_ADDR);
+#endif
+				if (epd->ebs.is_cc_sec_boot) {
+					ret = explorer_load_fw(epd, PBL_SEC_NAME, FW_PBL_ADDR);
+				} else {
+					ret = explorer_load_fw(epd, PBL_NAME, FW_PBL_ADDR);
+				}
+#ifdef SLT_ENABLE
 			}
+#endif
 			break;
 	}
 
@@ -730,6 +800,14 @@ int explorer_load_pbl(struct explorer_plat_data *epd)
 		return ret;
 	}
 
+#ifdef PBL_2nd
+	ret = explorer_set_glb_reg_bits(epd, GLB_AP_CTRL_BOOT_STEP,
+		BOOT_TRANS_BIT_2ND_PBL);
+	if (ret < 0) {
+		AP_BOOT_ERR("set 2nd_pbl_trans_done failed.\n");
+		return ret;
+	}
+#endif
 	time_tag(epd, "load-pbl end");
 
 	return ret;
@@ -742,6 +820,12 @@ int explorer_load_os(struct explorer_plat_data *epd)
 	time_tag(epd, "load-os-fw start");
 
 	switch (epd->ebi.rmod) {
+#ifdef SLT_ENABLE
+		case RTOS_SLT:
+		case RTOS_SLT_AON:
+			ret = explorer_load_stl_os(epd);
+			break;
+#endif
 		case RTOS_AON:
 			if (epd->ebs.is_cc_sec_boot) {
 				ret = explorer_load_fw(epd, OS_AON_SEC_NAME, epd->ebi.rpos==RTOS_SRAM ? FW_OS_ADDR:FW_OS_DDR_ADDR);
@@ -975,6 +1059,12 @@ int stat_timeout_to_errcode(enum wait_stage stage) {
 			AP_BOOT_ERR("wait NPU ver failed\n");
 			ret = -R_NPU_VER_TO;
 			break;
+#ifdef PBL_2nd
+		case WAIT_2ND_PBL_OK:
+			AP_BOOT_ERR("verify PBL_SLT failed!\n");
+			ret = -R_SLT_VER_TO;
+			break;
+#endif
 		default:
 			break;
 	}
@@ -1010,6 +1100,12 @@ int explorer_poll_stat(struct explorer_plat_data *epd, unsigned long deadline, e
 		case WAIT_NPU_OK:
 			bits = SDU_BOOT_STAT_VERIFY_PASS_NPU;
 			break;
+#ifdef PBL_2nd
+		case WAIT_2ND_PBL_OK:
+			reg_addr = SDU_BOOT_STAT_REG9;
+			bits = SDU_BOOT_STAT_VERIFY_PASS_SLT;
+			break;
+#endif
 		default:
 			break;
 	}
@@ -1124,10 +1220,16 @@ int explorer_bootstage_pbl(struct explorer_plat_data *epd, unsigned long deadlin
 		ret = explorer_load_sdi(epd);
 		if (ret < 0)
 			goto out;
-		ret = explorer_load_ddr(epd);
-		if (ret < 0)
-			goto out;
+#ifdef SLT_ENABLE
+		if (epd->ebi.target_stage != PBL_SLT) {
+#endif
+			ret = explorer_load_ddr(epd);
+			if (ret < 0)
+				goto out;
 
+#ifdef SLT_ENABLE
+		}
+#endif
 		ret = explorer_load_pbl(epd);
 
 		if (ret < 0)
@@ -1251,6 +1353,19 @@ int explorer_wait_bootstage(struct explorer_plat_data *epd, enum boot_stage wstg
 		}
 		time_tag(epd, "pbl_prov was received by CC");
 		break;
+#ifdef SLT_ENABLE
+	case PBL_SLT:
+		/*
+		  SLT mode still need mailbox message notification,
+		  so here only wait 1st PBL, and not set current_stage;
+		*/
+		ret = explorer_poll_stat(epd, deadline, WAIT_PBL_OK);
+		if (ret < 0) {
+			return ret;
+		}
+		time_tag(epd, "stage-pbl slt end polled");
+		break;
+#endif
 	case PBL_NORMAL:
 		ret = explorer_poll_stat(epd, deadline, WAIT_PBL_OK);
 		if (ret < 0) {
@@ -1291,9 +1406,14 @@ int explorer_wait_bootstage(struct explorer_plat_data *epd, enum boot_stage wstg
 			   epd->ebi.rmod == RTOS_DBG_NOPM || epd->ebi.rmod == RTOS_RLS_NOPM) {
 			epd->ebs.cur_os_type = NORMAL_OS;
 		}
-		atomic_set(&epd->ebs.current_stage, OS_OK);
-		time_tag(epd, "stage-os-fw end polled");
-
+#ifdef SLT_ENABLE
+		if ((epd->ebi.rmod != RTOS_SLT) && (epd->ebi.rmod != RTOS_SLT_AON)) {
+#endif
+			atomic_set(&epd->ebs.current_stage, OS_OK);
+			time_tag(epd, "stage-os-fw end polled");
+#ifdef SLT_ENABLE
+		}
+#endif
 		if (atomic_read(&epd->ebs.rtos_on) == 0) {
 			info.majorType = MAJOR_TYPE_STAGE;
 			info.subType = STAGE_TYPE_RTOS_VERIFIED;
@@ -1434,6 +1554,11 @@ void init_timeout(struct explorer_plat_data *epd)
 	case PBL_PROV:
 		ebi->boot_timeout = 20000;
 		break;
+#ifdef SLT_ENABLE
+	case PBL_SLT:
+		ebi->boot_timeout = 20000;
+		break;
+#endif
 	case PBL_NORMAL:
 		ebi->boot_timeout = 20000;
 		break;
@@ -1569,7 +1694,7 @@ int explorer_boot(struct explorer_plat_data *epd)
 	/* flashable will be set after ps_hold up/int_rst_done & sdio re-attached.*/
 	while (!atomic_read(&ebs->flashable)) {
 		if (!time_after(jiffies, flashable_deadline)) {
-			msleep(10);
+			msleep(1);
 		} else {
 			AP_BOOT_ERR("%s: Repeated Boot! No power_off before boot, exit.\n", __func__);
 			report_power_exception(epd,
@@ -1601,11 +1726,19 @@ int explorer_boot(struct explorer_plat_data *epd)
 		goto exit;
 	}
 
-	if (ebi->target_stage == PBL_PROV) {
-		ret = explorer_wait_bootstage(epd, PBL_PROV, deadline);
+#ifdef SLT_ENABLE
+	if (ebi->target_stage == PBL_SLT) {
+		ret = explorer_wait_bootstage(epd, PBL_SLT, deadline);
 	} else {
-		ret = explorer_wait_bootstage(epd, PBL_NORMAL, deadline);
+#endif
+		if (ebi->target_stage == PBL_PROV) {
+			ret = explorer_wait_bootstage(epd, PBL_PROV, deadline);
+		} else {
+			ret = explorer_wait_bootstage(epd, PBL_NORMAL, deadline);
+		}
+#ifdef SLT_ENABLE
 	}
+#endif
 	if (ret < 0) {
 		AP_BOOT_ERR("explorer_wait_bootstage PBL failed, exit boot\n");
 		goto exit;
@@ -1622,6 +1755,11 @@ int explorer_boot(struct explorer_plat_data *epd)
 	    ebi->target_stage == PBL_PROV ) {
 		goto final_wait;
 	}
+#ifdef SLT_ENABLE
+	if (ebi->target_stage == PBL_SLT) {
+		goto final_wait;
+	}
+#endif
 
 	ret = explorer_wait_bootstage(epd, MIPI_BP_OK, deadline);
 	if (ret < 0) {
@@ -1945,6 +2083,26 @@ int explorer_proc_pbl_msg(struct explorer_plat_data *epd, struct hal_comm_data *
 	switch (sub_cmd) {
 	case PBL_SUB_CMD_DFT:
 		switch (comm_data->data[0]) {
+#ifdef PBL_2nd
+		case ID_2ND_RLD_SET:
+			explorer_clr_glb_reg_bits(epd, GLB_AP_CTRL_BOOT_STEP,
+					BOOT_TRANS_BIT_2ND_PBL);
+			break;
+		case ID_2ND_RLD_CLR:
+			ret = explorer_load_stl_2nd_pbl(epd);
+			if (ret < 0) {
+				AP_BOOT_ERR("load 2nd PBL failed.");
+				return ret;
+			}
+
+			ret = explorer_set_glb_reg_bits(epd, GLB_AP_CTRL_BOOT_STEP,
+					BOOT_TRANS_BIT_2ND_PBL);
+			if (ret < 0) {
+				AP_BOOT_ERR("set 2nd_pbl_trans_done failed.\n");
+				return ret;
+			}
+			break;
+#endif
 		case ID_DDRFW_RLD_SET:
 			explorer_clr_glb_reg_bits(epd, GLB_AP_CTRL_BOOT_STEP,
 					BOOT_TRANS_BIT_DDR_FW);
@@ -1973,6 +2131,12 @@ int explorer_proc_pbl_msg(struct explorer_plat_data *epd, struct hal_comm_data *
 		case ID_ISP_RLD_CLR:
 			/* re-load fw & set transdone flag */
 			break;
+#ifdef SLT_ENABLE
+		case ID_SLT_BEGIN:
+			atomic_set(&epd->ebs.current_stage, PBL_SLT);
+			time_tag(epd, "stage-pbl-slt end triggered");
+			break;
+#endif
 		case ID_PROV_DONE:
 			atomic_set(&epd->ebs.current_stage, PBL_PROV);
 			time_tag(epd, "stage-pbl-prov end triggered");
@@ -2026,6 +2190,12 @@ int explorer_proc_pbl_msg(struct explorer_plat_data *epd, struct hal_comm_data *
 				epd->ebs.cur_os_type = AON_OS;
 			} else if (epd->ebi.rmod == RTOS_PLAT) {
 				epd->ebs.cur_os_type = PLAT_OS;
+#ifdef SLT_ENABLE
+			} else if (epd->ebi.rmod == RTOS_SLT) {
+				epd->ebs.cur_os_type = SLT_OS;
+			} else if (epd->ebi.rmod == RTOS_SLT_AON) {
+				epd->ebs.cur_os_type = SLT_OS_AON;
+#endif /*end of SLT_ENABLE */
 			} else if (epd->ebi.rmod == RTOS_NORMAL || epd->ebi.rmod == RTOS_RLS ||
 				   epd->ebi.rmod == RTOS_DBG_NOPM || epd->ebi.rmod == RTOS_RLS_NOPM) {
 				epd->ebs.cur_os_type = NORMAL_OS;
@@ -2037,6 +2207,19 @@ int explorer_proc_pbl_msg(struct explorer_plat_data *epd, struct hal_comm_data *
 				atomic_set(&epd->ebs.current_stage, NPU_OK);
 				time_tag(epd, "stage-npu-fw end triggered");
 			}
+#else /* else of AUTO_TRIG */
+#ifdef SLT_ENABLE
+			if (epd->ebi.rmod == RTOS_SLT) {
+				epd->ebs.cur_os_type = SLT_OS;
+			} else if (epd->ebi.rmod == RTOS_SLT_AON) {
+				epd->ebs.cur_os_type = SLT_OS_AON;
+			}
+
+			if (epd->ebi.rmod == RTOS_SLT || epd->ebi.rmod == RTOS_SLT_AON) {
+				atomic_set(&epd->ebs.current_stage, OS_OK);
+				time_tag(epd, "stage-os-fw end triggered");
+			}
+#endif /*end of SLT_ENABLE */
 #endif /*end of AUTO_TRIG */
 			break;
 		case ID_NPU_OK:
@@ -2047,6 +2230,19 @@ int explorer_proc_pbl_msg(struct explorer_plat_data *epd, struct hal_comm_data *
 		case ID_INFORM_AP_RST:
 			/* TODO: reset CC */
 			break;
+#ifdef SLT_ENABLE
+		case ID_SLT_RLD_CE:
+			ret = explorer_load_fw(epd, SE_DATA_NAME, FW_SE_DATA_ADDR);
+			if (ret < 0) {
+				ret = explorer_load_stl_se_fw(epd);
+			}
+			if (ret < 0) {
+				AP_BOOT_ERR("load se fw failed in slt\n");
+				return ret;
+			}
+			explorer_set_glb_reg_bits(epd, GLB_AP_CTRL_BOOT_STEP, BOOT_TRANS_BIT_SE_FW | BOOT_STEP_SE_DONE);
+			break;
+#endif
 		case ID_DDR_FAIL:
 			atomic_set(&epd->is_ddr_failed, 1);
 			info.moduleId = EXCEPTION_DDR;
@@ -2069,6 +2265,15 @@ int explorer_proc_pbl_msg(struct explorer_plat_data *epd, struct hal_comm_data *
 		}
 		explorer_ddr_continue_boot(epd);
 		break;
+#ifdef SLT_ENABLE
+	case PBL_SUB_CMD_SLT:
+		ret = explorer_proc_pbl_slt_msg(epd, comm_data);
+		if (ret<0) {
+			pr_err("%s, explorer_proc_pbl_slt_msg failed.\n", __func__);
+			return ret;
+		}
+		break;
+#endif
 	case PBL_SUB_CMD_MB:
 		ret = explorer_proc_mipi_bypass(epd, comm_data);
 		if (ret<0) {

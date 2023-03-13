@@ -16,9 +16,7 @@ extern void android_vh_sync_txn_recvd_handler(void *unused, struct task_struct *
 #ifdef CONFIG_OPLUS_BINDER_PRIO_SKIP
 extern void android_vh_binder_priority_skip_handler(void *unused, struct task_struct *task, bool *skip);
 #endif
-#ifdef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM
 extern void android_vh_binder_proc_transaction_end_handler(void *unused, struct task_struct *caller_task, struct task_struct *binder_proc_task,
 		struct task_struct *binder_th_task, unsigned int code,
 		bool pending_async, bool sync);
-#endif
-#endif
+#endif /* _OPLUS_SA_BINDER_H_ */

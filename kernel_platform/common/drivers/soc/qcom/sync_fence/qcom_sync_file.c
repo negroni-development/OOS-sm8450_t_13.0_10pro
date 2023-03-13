@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
  */
 
@@ -26,6 +27,7 @@
 #define NAME_LEN	32
 
 #define SPEC_FENCE_FLAG_FENCE_ARRAY 0x10 /* user flags for debug */
+#define SPEC_FENCE_FLAG_ARRAY_BIND 0x11
 #define FENCE_MIN	1
 #define FENCE_MAX	32
 
@@ -82,6 +84,9 @@ static void clear_fence_array_tracker(bool force_clear)
 		array = node->fence_array;
 		fence = &array->base;
 		is_signaled = dma_fence_is_signaled(fence);
+
+		if (force_clear && !array->fences)
+			array->num_fences = 0;
 
 		pr_debug("force_clear:%d is_signaled:%d pending:%d\n", force_clear, is_signaled,
 			atomic_read(&array->num_pending));
@@ -180,16 +185,26 @@ static int spec_sync_create_array(struct fence_create_data *f)
 	bool signal_any;
 	int ret = 0;
 
-	if (fd < 0)
+	if (fd < 0) {
+		pr_err("failed to get_unused_fd_flags\n");
 		return fd;
+	}
 
-	if (f->num_fences < FENCE_MIN || f->num_fences > FENCE_MAX)
-		return -ERANGE;
+	if (f->num_fences < FENCE_MIN || f->num_fences > FENCE_MAX) {
+		pr_err("invalid arguments num_fences:%d\n", f->num_fences);
+		ret = -ERANGE;
+		goto error_args;
+	}
 
 	signal_any = f->flags & SPEC_FENCE_SIGNAL_ALL ? false : true;
 
 	fence_array = dma_fence_array_create(f->num_fences, NULL,
 				dma_fence_context_alloc(1), 0, signal_any);
+	if (!fence_array) {
+		pr_err("dma fence_array allocation failure\n");
+		ret = -ENOMEM;
+		goto error_args;
+	}
 
 	/* Set the enable signal such that signalling is not done during wait*/
 	set_bit(DMA_FENCE_FLAG_ENABLE_SIGNAL_BIT, &fence_array->base.flags);
@@ -197,19 +212,19 @@ static int spec_sync_create_array(struct fence_create_data *f)
 
 	sync_file = sync_file_create(&fence_array->base);
 	if (!sync_file) {
+		pr_err("sync_file_create fail\n");
 		ret = -EINVAL;
+		goto err;
+	}
+	node = kzalloc((sizeof(struct fence_array_node)), GFP_KERNEL);
+	if (!node) {
+		fput(sync_file->file);
+		ret = -ENOMEM;
 		goto err;
 	}
 
 	fd_install(fd, sync_file->file);
-
-	node = kzalloc((sizeof(struct fence_array_node)), GFP_KERNEL);
-	if (!node) {
-		ret = -ENOMEM;
-		goto err;
-	}
 	node->fence_array = fence_array;
-	dma_fence_get(&fence_array->base);
 
 	mutex_lock(&sync_dev.l_lock);
 	list_add_tail(&node->list, &sync_dev.fence_array_list);
@@ -219,7 +234,9 @@ static int spec_sync_create_array(struct fence_create_data *f)
 	return fd;
 
 err:
+	fence_array->num_fences = 0;
 	dma_fence_put(&fence_array->base);
+error_args:
 	put_unused_fd(fd);
 	return ret;
 }
@@ -249,7 +266,7 @@ static int spec_sync_bind_array(struct fence_bind_data *sync_bind_info)
 	struct dma_fence_array *fence_array;
 	struct dma_fence *fence = NULL;
 	struct dma_fence *user_fence = NULL;
-	struct dma_fence *fence_list = NULL;
+	struct dma_fence **fence_list;
 	int *user_fds, ret = 0, i;
 	u32 num_fences, counter;
 
@@ -266,6 +283,13 @@ static int spec_sync_bind_array(struct fence_bind_data *sync_bind_info)
 		ret = -EINVAL;
 		goto end;
 	}
+
+	if (fence_array->fences) {
+		pr_err("fence array already populated, spec fd:%d status:%d flags:0x%x\n",
+			sync_bind_info->out_bind_fd, dma_fence_get_status(fence), fence->flags);
+		goto end;
+	}
+
 	num_fences = fence_array->num_fences;
 	counter = num_fences;
 
@@ -288,11 +312,12 @@ static int spec_sync_bind_array(struct fence_bind_data *sync_bind_info)
 		goto out;
 	}
 
-	fence_array->fences = &fence_list;
+	spin_lock(fence->lock);
+	fence_array->fences = fence_list;
 	for (i = 0; i < num_fences; i++) {
 		user_fence = sync_file_get_fence(user_fds[i]);
 		if (!user_fence) {
-			pr_err("bind fences are invalid !! user_fd:%d out_bind_fd:%d\n",
+			pr_warn("bind fences are invalid !! user_fd:%d out_bind_fd:%d\n",
 				user_fds[i], sync_bind_info->out_bind_fd);
 			counter = i;
 			ret = -EINVAL;
@@ -303,19 +328,24 @@ static int spec_sync_bind_array(struct fence_bind_data *sync_bind_info)
 			 i, user_fds[i], fence_array->fences[i]->error);
 	}
 
+	set_bit(SPEC_FENCE_FLAG_ARRAY_BIND, &fence->flags);
 	clear_bit(DMA_FENCE_FLAG_ENABLE_SIGNAL_BIT, &fence->flags);
+	spin_unlock(fence->lock);
+
 	dma_fence_enable_sw_signaling(&fence_array->base);
 
 	clear_fence_array_tracker(false);
 
 bind_invalid:
-	for (i = counter - 1; i >= 0; i--)
-		dma_fence_put(fence_array->fences[i]);
-
 	if (ret) {
+		for (i = counter - 1; i >= 0; i--)
+			dma_fence_put(fence_array->fences[i]);
+
 		kfree(fence_list);
 		fence_array->fences = NULL;
+		fence_array->num_fences = 0;
 		dma_fence_set_error(fence, -EINVAL);
+		spin_unlock(fence->lock);
 		dma_fence_signal(fence);
 		clear_fence_array_tracker(false);
 	}

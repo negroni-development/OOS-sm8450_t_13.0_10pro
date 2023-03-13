@@ -17,10 +17,14 @@
 
 #include <kernel/sched/sched.h>
 #include <fs/proc/internal.h>
-
+#include <linux/signal.h>
 #ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
 #include <linux/cpuhotplug.h>
 #endif /* CONFIG_OPLUS_FEATURE_SCHED_SPREAD */
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
+#include "sa_jankinfo.h"
+#endif
 
 #include "sched_assist.h"
 #include "sa_common.h"
@@ -46,11 +50,12 @@ DEFINE_PER_CPU(struct list_head, ux_thread_list);
 #define scale_demand(d) ((d)/(WINDOW_SIZE >> SCHED_CAPACITY_SHIFT))
 #endif
 
-#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
 #define TOPAPP 4
+#define BGAPP  3
 bool is_top(struct task_struct *p)
 {
 	struct cgroup_subsys_state *css;
+
 	if (p == NULL)
 		return false;
 
@@ -58,21 +63,21 @@ bool is_top(struct task_struct *p)
 	css = task_css(p, cpu_cgrp_id);
 	if (!css) {
 		rcu_read_unlock();
-		 return false;
+		return false;
 	}
 	rcu_read_unlock();
 
 	return css->id == TOPAPP;
 }
 
+#ifdef CONFIG_OPLUS_FEATURE_INPUT_BOOST
 bool is_webview(struct task_struct *p)
 {
 	if (!is_top(p))
 		return false;
 
-	if (oplus_get_im_flag(p) == IM_FLAG_WEBVIEW) {
-	       return true;
-	}
+	if (oplus_get_im_flag(p) == IM_FLAG_WEBVIEW)
+		return true;
 
 	return false;
 }
@@ -96,7 +101,7 @@ void update_ux_sched_cputopo(void)
 	unsigned long prev_cap = 0;
 	unsigned long cpu_cap = 0;
 	unsigned int cpu = 0;
-	int i, insert_idx, cls_nr;
+	int i = 0, insert_idx = 0, cls_nr = 0;
 	struct ux_sched_cluster sched_cls;
 
 	/* reset prev cpu topo info */
@@ -134,9 +139,9 @@ void update_ux_sched_cputopo(void)
 			if (insert_idx == ux_sched_cputopo.cls_nr) {
 				ux_sched_cputopo.sched_cls[insert_idx] = sched_cls;
 			} else {
-				for (; cls_nr > insert_idx; cls_nr--) {
+				for (; cls_nr > insert_idx; cls_nr--)
 					ux_sched_cputopo.sched_cls[cls_nr] = ux_sched_cputopo.sched_cls[cls_nr-1];
-				}
+
 				ux_sched_cputopo.sched_cls[insert_idx] = sched_cls;
 			}
 		}
@@ -144,12 +149,6 @@ void update_ux_sched_cputopo(void)
 
 		prev_cap = cpu_cap;
 	}
-
-	/*
-	for (i = 0; i < ux_sched_cputopo.cls_nr; i++)
-		ux_debug("update ux sched cpu topology [cls_nr:%d cpus:%*pbl cap:%lu]",
-			i, cpumask_pr_args(&ux_sched_cputopo.sched_cls[i].cpus), ux_sched_cputopo.sched_cls[i].capacity);
-	*/
 }
 
 static noinline int tracing_mark_write(const char *buf)
@@ -172,6 +171,15 @@ void sa_scene_systrace_c(void)
 	char buf[64];
 
 	snprintf(buf, sizeof(buf), "C|9999|Ux_Scene|%d\n", global_sched_assist_scene);
+	tracing_mark_write(buf);
+}
+
+
+void hwbinder_systrace_c(unsigned int cpu, int flag)
+{
+	char buf[256];
+
+	snprintf(buf, sizeof(buf), "C|9999|Cpu%d_hwbinder|%d\n", cpu, flag);
 	tracing_mark_write(buf);
 }
 
@@ -257,8 +265,10 @@ inline bool test_task_is_rt(struct task_struct *task)
 	/* valid RT priority is 0..MAX_RT_PRIO-1 */
 	if ((task->prio >= 0) && (task->prio <= MAX_RT_PRIO-1))
 		return true;
+
 	return false;
 }
+EXPORT_SYMBOL_GPL(test_task_is_rt);
 
 static unsigned int ux_task_exec_limit(struct task_struct *p)
 {
@@ -270,15 +280,14 @@ static unsigned int ux_task_exec_limit(struct task_struct *p)
 		return exec_limit;
 	}
 
-	if (ux_state & SA_TYPE_ANIMATOR) {
+	if (ux_state & SA_TYPE_ANIMATOR)
 		exec_limit *= 8;
-	} else if (ux_state & SA_TYPE_LIGHT) {
+	else if (ux_state & SA_TYPE_LIGHT)
 		exec_limit *= 2;
-	} else if (ux_state & SA_TYPE_HEAVY) {
+	else if (ux_state & SA_TYPE_HEAVY)
 		exec_limit *= 8;
-	} else if (ux_state & SA_TYPE_LISTPICK) {
+	else if (ux_state & SA_TYPE_LISTPICK)
 		exec_limit *= 25;
-	}
 
 	return exec_limit;
 }
@@ -294,7 +303,7 @@ inline bool test_list_pick_ux(struct task_struct *task)
 	return false;
 }
 
-inline bool test_task_ux(struct task_struct *task)
+bool test_task_ux(struct task_struct *task)
 {
 	if (unlikely(!global_sched_assist_enabled))
 		return false;
@@ -308,11 +317,12 @@ inline bool test_task_ux(struct task_struct *task)
 	if (oplus_get_ux_state(task) & (SA_TYPE_HEAVY | SA_TYPE_LIGHT | SA_TYPE_ANIMATOR | SA_TYPE_LISTPICK)) {
 		struct oplus_task_struct *ots = get_oplus_task_struct(task);
 		unsigned int limit = ux_task_exec_limit(task);
+
 		if (ots->total_exec && (ots->total_exec > limit)) {
-			if (unlikely(global_debug_enabled & DEBUG_FTRACE)) {
+			if (unlikely(global_debug_enabled & DEBUG_FTRACE))
 				trace_printk("task is not ux by limit, comm=%-12s pid=%d ux_state=%d total_exec=%llu limit=%llu\n",
 					task->comm, task->pid, ots->ux_state, ots->total_exec, limit);
-			}
+
 			return false;
 		}
 
@@ -321,12 +331,12 @@ inline bool test_task_ux(struct task_struct *task)
 
 	return false;
 }
+EXPORT_SYMBOL_GPL(test_task_ux);
 
 inline int get_ux_state_type(struct task_struct *task)
 {
-	if (!task) {
+	if (!task)
 		return UX_STATE_INVALID;
-	}
 
 	if (!test_task_is_fair(task))
 		return UX_STATE_INVALID;
@@ -341,18 +351,16 @@ inline int get_ux_state_type(struct task_struct *task)
 }
 
 /* check if a's ux prio higher than b's prio */
-bool prio_higher(int a, int b) {
-	if (a & SA_TYPE_ANIMATOR) {
+bool prio_higher(int a, int b)
+{
+	if (a & SA_TYPE_ANIMATOR)
 		return !(b & SA_TYPE_ANIMATOR);
-	}
 
-	if (a & SA_TYPE_LIGHT) {
+	if (a & SA_TYPE_LIGHT)
 		return !(b & (SA_TYPE_ANIMATOR | SA_TYPE_LIGHT));
-	}
 
-	if (a & SA_TYPE_HEAVY) {
+	if (a & SA_TYPE_HEAVY)
 		return !(b & (SA_TYPE_ANIMATOR | SA_TYPE_LIGHT | SA_TYPE_HEAVY));
-	}
 
 	/* SA_TYPE_LISTPICK */
 	return false;
@@ -367,17 +375,15 @@ static void insert_ux_task_into_list(struct oplus_task_struct *ots, struct oplus
 		struct oplus_task_struct *tmp_ots = container_of(pos, struct oplus_task_struct,
 			ux_entry);
 
-		if (prio_higher(ots->ux_state, tmp_ots->ux_state)) {
+		if (prio_higher(ots->ux_state, tmp_ots->ux_state))
 			break;
-		}
 	}
 
 	list_add(&ots->ux_entry, pos->prev);
 
 	tsk = ots_to_ts(ots);
-	if (unlikely(global_debug_enabled & DEBUG_FTRACE)) {
+	if (unlikely(global_debug_enabled & DEBUG_FTRACE))
 		trace_printk("insert ux=%-12s pid=%d ux_state=%d\n", tsk->comm, tsk->pid, ots->ux_state);
-	}
 }
 
 void account_ux_runtime(struct rq *rq, struct task_struct *curr)
@@ -429,14 +435,12 @@ static void enqueue_ux_thread(struct rq *rq, struct task_struct *p)
 
 	ots = get_oplus_task_struct(p);
 
-	if (!test_task_is_fair(p) || !oplus_list_empty(&ots->ux_entry)) {
+	if (!test_task_is_fair(p) || !oplus_list_empty(&ots->ux_entry))
 		return;
-	}
 
 	/* task's ux entry should be initialized with INIT_LIST_HEAD() */
-	if (ots->ux_entry.prev == 0 && ots->ux_entry.next == 0) {
+	if (ots->ux_entry.prev == 0 && ots->ux_entry.next == 0)
 		INIT_LIST_HEAD(&ots->ux_entry);
-	}
 
 	oplus_set_enqueue_time(p, rq->clock);
 
@@ -456,9 +460,8 @@ static void enqueue_ux_thread(struct rq *rq, struct task_struct *p)
 			get_task_struct(p);
 		}
 
-		if (!ots->total_exec) {
+		if (!ots->total_exec)
 			ots->sum_exec_baseline = p->se.sum_exec_runtime;
-		}
 	}
 }
 
@@ -466,9 +469,8 @@ static void dequeue_ux_thread(struct rq *rq, struct task_struct *p)
 {
 	struct oplus_task_struct *ots = NULL;
 
-	if (!rq || !p) {
+	if (!rq || !p)
 		return;
-	}
 
 	oplus_set_enqueue_time(p, 0);
 	ots = get_oplus_task_struct(p);
@@ -482,27 +484,24 @@ static void dequeue_ux_thread(struct rq *rq, struct task_struct *p)
 			atomic64_set(&ots->inherit_ux, 0);
 			ots->ux_depth = 0;
 			ots->ux_state = 0;
-			if (unlikely(global_debug_enabled & DEBUG_FTRACE)) {
+			if (unlikely(global_debug_enabled & DEBUG_FTRACE))
 				trace_printk("dequeue and unset inherit ux task=%-12s pid=%d tgid=%d now=%llu inherit_start=%llu\n",
 					p->comm, p->pid, p->tgid, now, ots->inherit_ux_start);
-			}
 		}
 
 		if (ots->ux_state & SA_TYPE_ONCE) {
 			atomic64_set(&ots->inherit_ux, 0);
 			ots->ux_depth = 0;
 			ots->ux_state = 0;
-			if (unlikely(global_debug_enabled & DEBUG_FTRACE)) {
+			if (unlikely(global_debug_enabled & DEBUG_FTRACE))
 				trace_printk("dequeue and unset once ux task=%-12s pid=%d tgid=%d now=%llu inherit_start=%llu\n",
 					p->comm, p->pid, p->tgid, now, ots->inherit_ux_start);
-			}
 		}
 		put_task_struct(p);
 	}
 
-	if (p->state != TASK_RUNNING) {
+	if (p->state != TASK_RUNNING)
 		ots->total_exec = 0;
-	}
 }
 
 void queue_ux_thread(struct rq *rq, struct task_struct *p, int enqueue)
@@ -518,13 +517,13 @@ bool test_inherit_ux(struct task_struct *task, int type)
 {
 	u64 inherit_ux;
 
-	if (!task) {
+	if (!task)
 		return false;
-	}
 
 	inherit_ux = oplus_get_inherit_ux(task);
 	return inherit_ux_get_bits(inherit_ux, type) > 0;
 }
+EXPORT_SYMBOL_GPL(test_inherit_ux);
 
 inline void inherit_ux_inc(struct task_struct *task, int type)
 {
@@ -540,7 +539,8 @@ inline void inherit_ux_sub(struct task_struct *task, int type, int value)
 	atomic64_sub(inherit_ux_value(type, value), &ots->inherit_ux);
 }
 
-void inc_inherit_ux_refs(struct task_struct *task, int type) {
+void inc_inherit_ux_refs(struct task_struct *task, int type)
+{
 	struct rq_flags flags;
 	struct rq *rq;
 
@@ -566,9 +566,8 @@ void set_inherit_ux(struct task_struct *task, int type, int depth, int inherit_v
 	struct rq_flags flags;
 	struct rq *rq = NULL;
 
-	if (!task || type >= INHERIT_UX_MAX) {
+	if (!task || type >= INHERIT_UX_MAX)
 		return;
-	}
 
 	rq = task_rq_lock(task, &flags);
 
@@ -591,6 +590,7 @@ void set_inherit_ux(struct task_struct *task, int type, int depth, int inherit_v
 	if (task->state == TASK_RUNNING && oplus_list_empty(oplus_get_ux_entry(task))) {
 		struct oplus_task_struct *ots = get_oplus_task_struct(task);
 		struct oplus_rq *orq = (struct oplus_rq *) rq->android_oem_data1;
+
 		insert_ux_task_into_list(ots, orq);
 		get_task_struct(task);
 	}
@@ -606,9 +606,8 @@ void reset_inherit_ux(struct task_struct *inherit_task, struct task_struct *ux_t
 	int reset_inherit = 0;
 	int ux_state;
 
-	if (!inherit_task || !ux_task || reset_type >= INHERIT_UX_MAX) {
+	if (!inherit_task || !ux_task || reset_type >= INHERIT_UX_MAX)
 		return;
-	}
 
 	reset_inherit = oplus_get_ux_state(ux_task);
 	reset_depth = oplus_get_ux_depth(ux_task);
@@ -634,9 +633,8 @@ void unset_inherit_ux_value(struct task_struct *task, int type, int value)
 	s64 inherit_ux = 0;
 	struct oplus_task_struct *ots = NULL;
 
-	if (!task || type >= INHERIT_UX_MAX) {
+	if (!task || type >= INHERIT_UX_MAX)
 		return;
-	}
 
 	rq = task_rq_lock(task, &flags);
 
@@ -648,9 +646,8 @@ void unset_inherit_ux_value(struct task_struct *task, int type, int value)
 		return;
 	}
 
-	if (inherit_ux < 0) {
+	if (inherit_ux < 0)
 		oplus_set_inherit_ux(task, 0);
-	}
 
 	ots = get_oplus_task_struct(task);
 	ots->ux_depth = 0;
@@ -665,18 +662,62 @@ void unset_inherit_ux(struct task_struct *task, int type)
 	unset_inherit_ux_value(task, type, 1);
 }
 
-#define HWC_NAME "composer-servic"
+bool im_mali(struct task_struct *p)
+{
+	return strstr(p->comm, "mali-event-hand");
+}
+
+bool cgroup_check_set_sched_assist_boost(struct task_struct *p)
+{
+	return im_mali(p);
+}
+
+void cgroup_set_sched_assist_boost_task(struct task_struct *p)
+{
+	struct rq_flags flags;
+	struct rq *rq;
+	int ux_state;
+
+	if(cgroup_check_set_sched_assist_boost(p)) {
+		rq = task_rq_lock(p, &flags);
+
+		ux_state = oplus_get_ux_state(p);
+		if (is_top(p))
+			oplus_set_ux_state(p, (ux_state | SA_TYPE_HEAVY));
+		else
+			oplus_set_ux_state(p, (ux_state & ~SA_TYPE_HEAVY));
+
+		task_rq_unlock(rq, p, &flags);
+	} else
+		return;
+}
+
+void clear_all_inherit_type(struct task_struct *p)
+{
+	struct rq_flags flags;
+	struct rq *rq = NULL;
+	struct oplus_task_struct *ots = NULL;
+
+	rq = task_rq_lock(p, &flags);
+	ots = get_oplus_task_struct(p);
+	atomic64_set(&ots->inherit_ux, 0);
+	ots->ux_depth = 0;
+	ots->ux_state = 0;
+	task_rq_unlock(rq, p, &flags);
+}
+
 void sched_assist_target_comm(struct task_struct *task, const char *buf)
 {
-#ifdef CONFIG_OPLUS_FEATURE_HWC_BOOST
-/* mark all hwc threads */
-	if (strstr(buf, HWC_NAME)) {
-		oplus_set_im_flag(task, IM_FLAG_HWC);
-		return;
-	}
-#endif
+	/*set mali-event-handle ux when task fork*/
+	cgroup_set_sched_assist_boost_task(task);
 
-	return;
+	/* TODO: remove it in next version */
+	if (task->group_leader && strstr(task->group_leader->comm, "lizhifm"))
+		if (strstr(buf, "Aplayer"))
+			oplus_set_im_flag(task, IM_FLAG_3RD_AUDIO);
+
+	if (!strncmp(buf, "HwBinder", 8))
+		oplus_set_im_flag(task, IM_FLAG_HWBINDER);
 }
 
 void adjust_rt_lowest_mask(struct task_struct *p, struct cpumask *local_cpu_mask, int ret, bool force_adjust)
@@ -687,6 +728,10 @@ void adjust_rt_lowest_mask(struct task_struct *p, struct cpumask *local_cpu_mask
 	int keep_backup_cpu = -1;
 	int lowest_prio = INT_MIN;
 	unsigned int drop_cpu;
+	struct rq *rq;
+	struct task_struct *task;
+	struct oplus_rq *orq;
+	struct oplus_task_struct *ots = NULL;
 
 	if (!ret || !local_cpu_mask || cpumask_empty(local_cpu_mask))
 		return;
@@ -696,35 +741,42 @@ void adjust_rt_lowest_mask(struct task_struct *p, struct cpumask *local_cpu_mask
 	drop_cpu = cpumask_first(local_cpu_mask);
 	while (drop_cpu < nr_cpu_ids) {
 		/* unlocked access */
-		struct task_struct *task = READ_ONCE(cpu_rq(drop_cpu)->curr);
+		rq = cpu_rq(drop_cpu);
+		orq = (struct oplus_rq *) rq->android_oem_data1;
+		task = rq->curr;
 
-#ifdef CONFIG_OPLUS_FEATURE_HWC_BOOST
-		if (oplus_get_im_flag(p) == IM_FLAG_HWC && !oplus_is_min_capacity_cpu(drop_cpu)) {
-			drop_cpu = cpumask_next(drop_cpu, local_cpu_mask);
-			continue;
+		if (!test_task_ux(task)) {
+			if (oplus_list_empty(&orq->ux_list)) {
+				drop_cpu = cpumask_next(drop_cpu, local_cpu_mask);
+				continue;
+			} else {
+				ots = list_first_entry(&orq->ux_list, struct oplus_task_struct, ux_entry);
+				task  = ots_to_ts(ots);
+			}
 		}
-#endif
+
 		/* avoid sf premmpt heavy ux tasks,such as ui, render... */
 		if ((oplus_get_im_flag(p) == IM_FLAG_SURFACEFLINGER || oplus_get_im_flag(p) == IM_FLAG_RENDERENGINE) &&
 			((oplus_get_ux_state(task) & SA_TYPE_HEAVY) || (oplus_get_ux_state(task) & SA_TYPE_LISTPICK))) {
 			cpumask_clear_cpu(drop_cpu, local_cpu_mask);
-			if (unlikely(global_debug_enabled & DEBUG_FTRACE)) {
+			if (unlikely(global_debug_enabled & DEBUG_FTRACE))
 				trace_printk("clear cpu from lowestmask, curr_heavy task=%-12s pid=%d drop_cpu=%d\n", task->comm, task->pid, drop_cpu);
-			}
 		}
 
+#ifdef CONFIG_OPLUS_SCHED_MT6895
+		if (oplus_get_ux_state(task) & SA_TYPE_HEAVY) {
+#else
 		if (sched_assist_scene(SA_LAUNCH) && (oplus_get_ux_state(task) & SA_TYPE_HEAVY)) {
+#endif
 			cpumask_clear_cpu(drop_cpu, local_cpu_mask);
-			if (unlikely(global_debug_enabled & DEBUG_FTRACE)) {
+			if (unlikely(global_debug_enabled & DEBUG_FTRACE))
 				trace_printk("clear cpu from lowestmask, curr_heavy task=%-12s pid=%d drop_cpu=%d\n", task->comm, task->pid, drop_cpu);
-			}
 		}
 
 		if (oplus_get_ux_state(task) & SA_TYPE_ANIMATOR) {
 			cpumask_clear_cpu(drop_cpu, local_cpu_mask);
-			if (unlikely(global_debug_enabled & DEBUG_FTRACE)) {
+			if (unlikely(global_debug_enabled & DEBUG_FTRACE))
 				trace_printk("clear cpu from lowestmask, curr_anima task=%-12s pid=%d drop_cpu=%d\n", task->comm, task->pid, drop_cpu);
-			}
 		}
 
 		drop_cpu = cpumask_next(drop_cpu, local_cpu_mask);
@@ -733,9 +785,8 @@ void adjust_rt_lowest_mask(struct task_struct *p, struct cpumask *local_cpu_mask
 	if (likely(!cpumask_empty(local_cpu_mask)))
 		return;
 
-	if (unlikely(global_debug_enabled & DEBUG_FTRACE)) {
+	if (unlikely(global_debug_enabled & DEBUG_FTRACE))
 		trace_printk("lowest mask is empty, force is %d\n", force_adjust);
-	}
 
 	/* We may get empty local_cpu_mask if we do unsuitable drop work */
 	if (!force_adjust) {
@@ -774,6 +825,31 @@ void adjust_rt_lowest_mask(struct task_struct *p, struct cpumask *local_cpu_mask
 		cpumask_set_cpu(keep_backup_cpu, local_cpu_mask);
 }
 EXPORT_SYMBOL(adjust_rt_lowest_mask);
+
+bool sa_skip_rt_sync(struct rq *rq, struct task_struct *p, bool *sync)
+{
+	int cpu = cpu_of(rq);
+	struct oplus_rq *orq = (struct oplus_rq *) rq->android_oem_data1;
+	struct oplus_task_struct *ots = NULL;
+
+	if (oplus_list_empty(&orq->ux_list))
+		return false;
+
+	ots = list_first_entry(&orq->ux_list, struct oplus_task_struct, ux_entry);
+	if (ots->im_flag == IM_FLAG_CAMERA_HAL)
+		return false;
+
+	if (*sync) {
+		*sync = false;
+		if (unlikely(global_debug_enabled & DEBUG_FTRACE))
+			trace_printk("comm=%-12s pid=%d cpu=%d\n", p->comm, p->pid, cpu);
+
+		return true;
+	}
+
+	return false;
+}
+EXPORT_SYMBOL(sa_skip_rt_sync);
 
 ssize_t oplus_show_cpus(const struct cpumask *mask, char *buf)
 {
@@ -838,6 +914,9 @@ void android_rvh_sched_fork_handler(void *unused, struct task_struct *p)
 
 void android_rvh_enqueue_task_handler(void *unused, struct rq *rq, struct task_struct *p, int flags)
 {
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
+	jankinfo_android_rvh_enqueue_task_handler(unused, rq, p, flags);
+#endif
 	queue_ux_thread(rq, p, 1);
 }
 
@@ -848,11 +927,14 @@ void android_rvh_dequeue_task_handler(void *unused, struct rq *rq, struct task_s
 
 void android_rvh_schedule_handler(void *unused, struct task_struct *prev, struct task_struct *next, struct rq *rq)
 {
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
+	jankinfo_android_rvh_schedule_handler(unused, prev, next, rq);
+#endif
+
 	oplus_set_enqueue_time(prev, rq->clock);
 
-	if (unlikely(global_debug_enabled & DEBUG_SYSTRACE) && likely(prev != next)) {
+	if (unlikely(global_debug_enabled & DEBUG_SYSTRACE) && likely(prev != next))
 		ux_state_systrace_c(cpu_of(rq), next);
-	}
 }
 
 void android_vh_scheduler_tick_handler(void *unused, struct rq *rq)
@@ -873,6 +955,43 @@ void android_vh_scheduler_tick_handler(void *unused, struct rq *rq)
 #endif /* CONFIG_OPLUS_FEATURE_SCHED_SPREAD */
 	}
 }
+static int boost_kill = 1;
+module_param_named(boost_kill, boost_kill, uint, 0644);
+int get_grp(struct task_struct *p)
+{
+	struct cgroup_subsys_state *css;
 
-EXPORT_SYMBOL_GPL(test_inherit_ux);
-EXPORT_SYMBOL_GPL(test_task_is_rt);
+	if (p == NULL)
+		return false;
+
+	rcu_read_lock();
+	css = task_css(p, cpu_cgrp_id);
+	if (!css) {
+		rcu_read_unlock();
+		return false;
+	}
+	rcu_read_unlock();
+
+	return css->id;
+}
+
+void android_vh_do_send_sig_handler(void *unused, int sig, struct task_struct *cur, struct task_struct *p)
+{
+	struct cpumask *new_mask = (struct cpumask *)cpu_possible_mask;
+
+	if (sig == SIGKILL && boost_kill && get_grp(p) == BGAPP) {
+		set_user_nice(p, -20);
+		if (!cpumask_empty(new_mask)) {
+			cpumask_copy(&p->cpus_mask, new_mask);
+			p->cpus_ptr = new_mask;
+			p->nr_cpus_allowed = cpumask_weight(new_mask);
+		}
+	}
+}
+
+void android_vh_cgroup_set_task_handler(void *unused, int ret, struct task_struct *task)
+{
+	if (!ret) {
+		cgroup_set_sched_assist_boost_task(task);
+	}
+}

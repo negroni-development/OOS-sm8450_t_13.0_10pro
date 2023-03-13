@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/init.h>
@@ -434,11 +435,12 @@ int msm_audio_get_phy_addr(int fd, dma_addr_t *paddr, size_t *pa_len)
 }
 EXPORT_SYMBOL(msm_audio_get_phy_addr);
 
-int msm_audio_set_hyp_assign(int fd, bool assign)
+static int msm_audio_set_hyp_assign(int fd, bool assign)
 {
 	struct msm_audio_fd_data *msm_audio_fd_data = NULL;
 	int status = -EINVAL;
 	pr_debug("%s, fd %d\n", __func__, fd);
+
 	mutex_lock(&(msm_audio_ion_fd_list.list_mutex));
 	list_for_each_entry(msm_audio_fd_data,
 			&msm_audio_ion_fd_list.fd_list, list) {
@@ -567,7 +569,8 @@ static int msm_audio_ion_free(struct dma_buf *dma_buf, struct msm_audio_ion_priv
 	return 0;
 }
 
-int msm_audio_hyp_unassign(struct msm_audio_fd_data *msm_audio_fd_data) {
+static int msm_audio_hyp_unassign(struct msm_audio_fd_data *msm_audio_fd_data)
+{
 	int ret = 0;
 	int dest_perms_unmap[1] = {PERM_READ | PERM_WRITE | PERM_EXEC};
 	int source_vm_unmap[3] = {VMID_LPASS, VMID_ADSP_HEAP, VMID_HLOS};
@@ -600,23 +603,33 @@ void msm_audio_ion_crash_handler(void)
 	struct msm_audio_ion_private *ion_data = NULL;
 
 	pr_debug("Inside %s\n", __func__);
+	if(!msm_audio_ion_fd_list_init) {
+		pr_err("%s: list not initialized yet, hence returning .... ", __func__);
+		return;
+	}
 	mutex_lock(&(msm_audio_ion_fd_list.list_mutex));
 	list_for_each_entry(msm_audio_fd_data,
 		&msm_audio_ion_fd_list.fd_list, list) {
-		handle = msm_audio_fd_data->handle;
-		ion_data = dev_get_drvdata(msm_audio_fd_data->dev);
-		/*  clean if CMA was used*/
-		if (msm_audio_fd_data->hyp_assign) {
-			msm_audio_hyp_unassign(msm_audio_fd_data);
+		if(msm_audio_fd_data) {
+			handle = msm_audio_fd_data->handle;
+			ion_data = dev_get_drvdata(msm_audio_fd_data->dev);
+			/*  clean if CMA was used*/
+			if (msm_audio_fd_data->hyp_assign)
+				msm_audio_hyp_unassign(msm_audio_fd_data);
+			if(handle)
+				msm_audio_ion_free(handle, ion_data);
 		}
-		msm_audio_ion_free(handle, ion_data);
 	}
 	list_for_each_safe(ptr, next,
 		&msm_audio_ion_fd_list.fd_list) {
-		msm_audio_fd_data = list_entry(ptr, struct msm_audio_fd_data,
-						list);
-		list_del(&(msm_audio_fd_data->list));
-		kfree(msm_audio_fd_data);
+		if(ptr) {
+			msm_audio_fd_data = list_entry(ptr, struct msm_audio_fd_data,
+							list);
+			if(msm_audio_fd_data) {
+				list_del(&(msm_audio_fd_data->list));
+				kfree(msm_audio_fd_data);
+			}
+		}
 	}
 	mutex_unlock(&(msm_audio_ion_fd_list.list_mutex));
 }

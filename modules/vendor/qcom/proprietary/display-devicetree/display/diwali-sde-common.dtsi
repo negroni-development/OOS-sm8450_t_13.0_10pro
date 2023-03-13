@@ -114,13 +114,9 @@
 		qcom,sde-mixer-blend-op-off = <0x20 0x38 0x50 0x68 0x80 0x98
 						0xb0 0xc8 0xe0 0xf8 0x110>;
 
-		qcom,sde-max-per-pipe-bw-kbps = <4500000 4500000
-						 4500000 4500000
-						 4500000>;
-
-		qcom,sde-max-per-pipe-bw-high-kbps = <5200000 5200000
-							5200000 5200000
-							5200000>;
+		qcom,sde-max-per-pipe-bw-kbps = <4100000 4100000
+						4100000 4100000
+						4100000>;
 
 		/* offsets are relative to "mdp_phys + qcom,sde-off */
 		qcom,sde-sspp-clk-ctrl =
@@ -140,8 +136,8 @@
 		qcom,sde-wb-linewidth = <4096>;
 		qcom,sde-wb-linewidth-linear = <5120>;
 		qcom,sde-mixer-blendstages = <9>;
-		qcom,sde-highest-bank-bit = <0x8 0x3>,
-					<0x7 0x2>;
+		qcom,sde-highest-bank-bit = <0x8 0x2>,
+					<0x7 0x1>;
 		qcom,sde-ubwc-version = <0x400>;
 		qcom,sde-ubwc-swizzle = <0x6>;
 		qcom,sde-ubwc-bw-calc-version = <0x1>;
@@ -158,13 +154,16 @@
 
 		qcom,sde-max-dest-scaler-input-linewidth = <2048>;
 		qcom,sde-max-dest-scaler-output-linewidth = <2560>;
-		qcom,sde-max-bw-low-kbps = <13600000>;
-		qcom,sde-max-bw-high-kbps = <18200000>;
+		qcom,sde-max-bw-low-kbps = <0x8 6600000>,
+					<0x7 5300000>;
+		qcom,sde-max-bw-high-kbps = <0x8 14600000>,
+					<0x7 11000000>;
 		qcom,sde-min-core-ib-kbps = <2500000>;
 		qcom,sde-min-llcc-ib-kbps = <0>;
 		qcom,sde-min-dram-ib-kbps = <800000>;
 		qcom,sde-dram-channels = <2>;
 		qcom,sde-num-nrt-paths = <0>;
+		qcom,sde-num-ddr-channels = <2>;
 
 		qcom,sde-dspp-spr-off = <0x15400 0x14400>;
 		qcom,sde-dspp-spr-size = <0x200>;
@@ -316,6 +315,7 @@
 		reg-names = "dsi_ctrl", "disp_cc_base", "mdp_intf_base";
 		interrupt-parent = <&mdss_mdp>;
 		interrupts = <4 0>;
+		qcom,split-link-supported;
 
 		qcom,ctrl-supply-entries {
 			#address-cells = <1>;
@@ -325,7 +325,7 @@
 				reg = <0>;
 				qcom,supply-name = "vdda-1p2";
 				qcom,supply-min-voltage = <1200000>;
-				qcom,supply-max-voltage = <1200000>;
+				qcom,supply-max-voltage = <1260000>;
 				qcom,supply-enable-load = <16600>;
 				qcom,supply-disable-load = <0>;
 			};
@@ -343,6 +343,7 @@
 		reg-names = "dsi_ctrl", "disp_cc_base", "mdp_intf_base";
 		interrupt-parent = <&mdss_mdp>;
 		interrupts = <5 0>;
+		qcom,split-link-supported;
 
 		qcom,ctrl-supply-entries {
 			#address-cells = <1>;
@@ -351,7 +352,7 @@
 				reg = <0>;
 				qcom,supply-name = "vdda-1p2";
 				qcom,supply-min-voltage = <1200000>;
-				qcom,supply-max-voltage = <1200000>;
+				qcom,supply-max-voltage = <1260000>;
 				qcom,supply-enable-load = <16600>;
 				qcom,supply-disable-load = <0>;
 			};
@@ -387,7 +388,7 @@
 				reg = <0>;
 				qcom,supply-name = "vdda-0p9";
 				qcom,supply-min-voltage = <880000>;
-				qcom,supply-max-voltage = <880000>;
+				qcom,supply-max-voltage = <1050000>;
 				qcom,supply-enable-load = <97800>;
 				qcom,supply-disable-load = <0>;
 			};
@@ -423,7 +424,7 @@
 				reg = <0>;
 				qcom,supply-name = "vdda-0p9";
 				qcom,supply-min-voltage = <880000>;
-				qcom,supply-max-voltage = <880000>;
+				qcom,supply-max-voltage = <1050000>;
 				qcom,supply-enable-load = <97800>;
 				qcom,supply-disable-load = <0>;
 			};

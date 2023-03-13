@@ -60,4 +60,5 @@ bool is_cr_main(struct task_struct *p);
 int find_cr_main_cpu(struct task_struct *p);
 bool is_prime_fits(int cpu);
 bool need_frame_boost(struct task_struct *p);
+void set_fbg_thread(struct task_struct *task, bool is_add);
 #endif

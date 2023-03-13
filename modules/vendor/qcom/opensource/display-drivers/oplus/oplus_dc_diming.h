@@ -17,7 +17,6 @@
 
 #include "dsi_panel.h"
 #include "dsi_defs.h"
-#include "oplus_display_panel_hbm.h"
 
 int sde_connector_update_backlight(struct drm_connector *connector, bool post);
 
@@ -32,9 +31,7 @@ int oplus_display_panel_get_dim_dc_alpha(void *buf);
 int oplus_display_panel_get_dimlayer_enable(void *data);
 int oplus_display_panel_set_dimlayer_enable(void *data);
 int dsi_panel_parse_oplus_dc_config(struct dsi_panel *panel);
-void oplus_ofp_hande_display_backlight(struct dsi_display *display, int hbm_status);
 int bl_to_alpha_dc(int brightness);
 int oplus_get_panel_brightness(void);
-int oplus_ofp_hande_display_softiris(void);
 int oplus_find_index_invmaplist(uint32_t bl_level);
 #endif /*_OPLUS_DC_DIMING_H_*/

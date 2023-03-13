@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef UFS_QCOM_H_
@@ -9,6 +10,11 @@
 #include <linux/reset.h>
 #include <linux/phy/phy.h>
 #include <linux/pm_qos.h>
+
+#include <linux/proc_fs.h>
+
+#include <linux/nvmem-consumer.h>
+
 #include "ufshcd.h"
 #include "unipro.h"
 
@@ -52,6 +58,9 @@
 #define UFS_QCOM_LIMIT_HS_RATE		PA_HS_MODE_B
 #define UFS_QCOM_LIMIT_DESIRED_MODE	FAST
 #define UFS_QCOM_LIMIT_PHY_SUBMODE	UFS_QCOM_PHY_SUBMODE_G4
+#define UFS_QCOM_DEFAULT_TURBO_FREQ     300000000
+#define UFS_QCOM_DEFAULT_TURBO_L1_FREQ  300000000
+#define UFS_NOM_THRES_FREQ	300000000
 
 /* default value of auto suspend is 3 seconds */
 #define UFS_QCOM_AUTO_SUSPEND_DELAY	3000
@@ -100,6 +109,15 @@ enum {
 	UFS_UFS_DBG_RD_EDTL_RAM			= 0x1900,
 };
 
+/* QCOM UFS host controller vendor specific H8 count registers */
+enum {
+	REG_UFS_HW_H8_ENTER_CNT				= 0x2700,
+	REG_UFS_SW_H8_ENTER_CNT				= 0x2704,
+	REG_UFS_SW_AFTER_HW_H8_ENTER_CNT	= 0x2708,
+	REG_UFS_HW_H8_EXIT_CNT				= 0x270C,
+	REG_UFS_SW_H8_EXIT_CNT				= 0x2710,
+};
+
 #define UFS_CNTLR_2_x_x_VEN_REGS_OFFSET(x)	(0x000 + x)
 #define UFS_CNTLR_3_x_x_VEN_REGS_OFFSET(x)	(0x400 + x)
 
@@ -139,6 +157,100 @@ enum {
 				 CC_UFS_ICE_CORE_CLK_REQ_EN |\
 				 CC_UFS_UNIPRO_CORE_CLK_REQ_EN |\
 				 CC_UFS_AUXCLK_REQ_EN)
+/*define ufs uic error code*/
+
+enum unipro_pa_errCode {
+	UNIPRO_PA_LANE0_ERR_CNT,
+	UNIPRO_PA_LANE1_ERR_CNT,
+	UNIPRO_PA_LANE2_ERR_CNT,
+	UNIPRO_PA_LANE3_ERR_CNT,
+	UNIPRO_PA_LINE_RESET,
+	UNIPRO_PA_ERR_MAX
+};
+
+enum unipro_dl_errCode {
+	UNIPRO_DL_NAC_RECEIVED,
+	UNIPRO_DL_TCX_REPLAY_TIMER_EXPIRED,
+	UNIPRO_DL_AFCX_REQUEST_TIMER_EXPIRED,
+	UNIPRO_DL_FCX_PROTECTION_TIMER_EXPIRED,
+	UNIPRO_DL_CRC_ERROR,
+	UNIPRO_DL_RX_BUFFER_OVERFLOW,
+	UNIPRO_DL_MAX_FRAME_LENGTH_EXCEEDED,
+	UNIPRO_DL_WRONG_SEQUENCE_NUMBER,
+	UNIPRO_DL_AFC_FRAME_SYNTAX_ERROR,
+	UNIPRO_DL_NAC_FRAME_SYNTAX_ERROR,
+	UNIPRO_DL_EOF_SYNTAX_ERROR,
+	UNIPRO_DL_FRAME_SYNTAX_ERROR,
+	UNIPRO_DL_BAD_CTRL_SYMBOL_TYPE,
+	UNIPRO_DL_PA_INIT_ERROR,
+	UNIPRO_DL_PA_ERROR_IND_RECEIVED,
+	UNIPRO_DL_PA_INIT,
+	UNIPRO_DL_ERR_MAX
+};
+
+enum unipro_nl_errCode {
+	UNIPRO_NL_UNSUPPORTED_HEADER_TYPE,
+	UNIPRO_NL_BAD_DEVICEID_ENC,
+	UNIPRO_NL_LHDR_TRAP_PACKET_DROPPING,
+	UNIPRO_NL_ERR_MAX
+};
+
+enum unipro_tl_errCode {
+	UNIPRO_TL_UNSUPPORTED_HEADER_TYPE,
+	UNIPRO_TL_UNKNOWN_CPORTID,
+	UNIPRO_TL_NO_CONNECTION_RX,
+	UNIPRO_TL_CONTROLLED_SEGMENT_DROPPING,
+	UNIPRO_TL_BAD_TC,
+	UNIPRO_TL_E2E_CREDIT_OVERFLOW,
+	UNIPRO_TL_SAFETY_VALVE_DROPPING,
+	UNIPRO_TL_ERR_MAX
+};
+
+enum unipro_dme_errCode {
+	UNIPRO_DME_GENERIC,
+	UNIPRO_DME_TX_QOS,
+	UNIPRO_DME_RX_QOS,
+	UNIPRO_DME_PA_INIT_QOS,
+	UNIPRO_DME_ERR_MAX
+};
+
+enum unipro_err_time_stamp {
+	UNIPRO_0_STAMP,
+	UNIPRO_1_STAMP,
+	UNIPRO_2_STAMP,
+	UNIPRO_3_STAMP,
+	UNIPRO_4_STAMP,
+	UNIPRO_5_STAMP,
+	UNIPRO_6_STAMP,
+	UNIPRO_7_STAMP,
+	UNIPRO_8_STAMP,
+	UNIPRO_9_STAMP,
+	STAMP_RECORD_MAX
+};
+#define STAMP_MIN_INTERVAL ((ktime_t)600000000000) /*ns, 10min*/
+
+struct signal_quality {
+	u32 ufs_device_err_cnt;
+	u32 ufs_host_err_cnt;
+	u32 ufs_bus_err_cnt;
+	u32 ufs_crypto_err_cnt;
+	u32 ufs_link_lost_cnt;
+	u32 unipro_PA_err_total_cnt;
+	u32 unipro_PA_err_cnt[UNIPRO_PA_ERR_MAX];
+	u32 unipro_DL_err_total_cnt;
+	u32 unipro_DL_err_cnt[UNIPRO_DL_ERR_MAX];
+	u32 unipro_NL_err_total_cnt;
+	u32 unipro_NL_err_cnt[UNIPRO_NL_ERR_MAX];
+	u32 unipro_TL_err_total_cnt;
+	u32 unipro_TL_err_cnt[UNIPRO_TL_ERR_MAX];
+	u32 unipro_DME_err_total_cnt;
+	u32 unipro_DME_err_cnt[UNIPRO_DME_ERR_MAX];
+	/* first 10 error cnt, interval is 10min at least */
+	ktime_t stamp[STAMP_RECORD_MAX];
+	int stamp_pos;
+};
+
+
 /* bit offset */
 enum {
 	OFFSET_UFS_PHY_SOFT_RESET           = 1,
@@ -184,8 +296,14 @@ enum ufs_qcom_phy_init_type {
 
 #define PA_VS_CLK_CFG_REG	0x9004
 #define PA_VS_CLK_CFG_REG_MASK	0x1FF
+#define PA_VS_CLK_CFG_REG_MASK1 0xFF
+
 #define DME_VS_CORE_CLK_CTRL_MAX_CORE_CLK_1US_CYCLES_MASK_V4	0xFFF
 #define DME_VS_CORE_CLK_CTRL_MAX_CORE_CLK_1US_CYCLES_OFFSET_V4	0x10
+
+#define PA_VS_CLK_CFG_REG_MASK_TURBO 0x100
+#define ATTR_HW_CGC_EN_TURBO 0x100
+#define ATTR_HW_CGC_EN_NON_TURBO 0x000
 
 #define PA_VS_CORE_CLK_40NS_CYCLES	0x9007
 #define PA_VS_CORE_CLK_40NS_CYCLES_MASK	0xF
@@ -200,6 +318,10 @@ enum ufs_qcom_phy_init_type {
 #define DME_VS_CORE_CLK_CTRL_MAX_CORE_CLK_1US_CYCLES_MASK	0xFF
 #define DME_VS_CORE_CLK_CTRL_CORE_CLK_DIV_EN_BIT		BIT(8)
 #define DME_VS_CORE_CLK_CTRL_DME_HW_CGC_EN			BIT(9)
+
+#define TEST_BUS_CTRL_2_HCI_SEL_TURBO_MASK 0x010
+#define TEST_BUS_CTRL_2_HCI_SEL_TURBO 0x010
+#define TEST_BUS_CTRL_2_HCI_SEL_NONTURBO 0x000
 
 /* Device Quirks */
 /*
@@ -246,6 +368,11 @@ struct ufs_transmission_status_t
 	u32 current_pwr_mode;
 };
 
+struct unipro_signal_quality_ctrl {
+	struct proc_dir_entry *ctrl_dir;
+	struct signal_quality record;
+	struct signal_quality record_upload;
+};
 
 static inline void
 ufs_qcom_get_controller_revision(struct ufs_hba *hba,
@@ -427,6 +554,7 @@ struct ufs_qcom_host {
 	int limit_rx_pwm_gear;
 	int limit_rate;
 	int limit_phy_submode;
+	int ufs_dev_types;
 
 	bool disable_lpm;
 	struct qcom_bus_scale_data *qbsd;
@@ -451,12 +579,40 @@ struct ufs_qcom_host {
 	atomic_t num_reqs_threshold;
 	bool cur_freq_vote;
 	struct delayed_work fwork;
+	struct workqueue_struct *fworkq;
+	struct mutex cpufreq_lock;
 	bool cpufreq_dis;
+	bool active;
 	unsigned int min_cpu_scale_freq;
 	unsigned int max_cpu_scale_freq;
 	int config_cpu;
 	void *ufs_ipc_log_ctx;
 	bool dbg_en;
+	struct nvmem_cell *nvmem_cell;
+
+	/* Multi level clk scaling Support */
+	bool ml_scale_sup;
+	bool is_turbo_enabled;
+	/* threshold count to scale down from turbo to NOM */
+	u32 turbo_down_thres_cnt;
+	/* turbo freq for UFS clocks read from DT */
+	u32 axi_turbo_clk_freq;
+	u32 axi_turbo_l1_clk_freq;
+	u32 ice_turbo_clk_freq;
+	u32 ice_turbo_l1_clk_freq;
+	u32 unipro_turbo_clk_freq;
+	u32 unipro_turbo_l1_clk_freq;
+	bool turbo_unipro_attr_applied;
+	/* some target need additional setting to support turbo mode*/
+	bool turbo_additional_conf_req;
+	/* current UFS clocks freq */
+	u32 curr_axi_freq;
+	u32 curr_ice_freq;
+	u32 curr_unipro_freq;
+	/* Indicates curr and next clk mode */
+	u32 clk_next_mode;
+	u32 clk_curr_mode;
+	bool is_clk_scale_enabled;
 };
 
 static inline u32

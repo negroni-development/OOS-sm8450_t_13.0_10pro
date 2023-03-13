@@ -36,6 +36,10 @@ extern ssize_t hybridswap_loop_device_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len);
 extern ssize_t hybridswap_loop_device_show(struct device *dev,
 		struct device_attribute *attr, char *buf);
+extern ssize_t backing_dev_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t len);
+extern ssize_t backing_dev_show(struct device *dev,
+		struct device_attribute *attr, char *buf);
 extern ssize_t hybridswap_dev_life_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len);
 extern ssize_t hybridswap_dev_life_show(struct device *dev,
@@ -48,6 +52,7 @@ extern ssize_t hybridswap_zram_increase_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len);
 extern ssize_t hybridswap_zram_increase_show(struct device *dev,
 		struct device_attribute *attr, char *buf);
+extern void hybridswap_unbind(struct zram *zram);
 #endif
 
 #ifdef CONFIG_HYBRIDSWAP_ASYNC_COMPRESS

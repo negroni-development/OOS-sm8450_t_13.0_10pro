@@ -32,8 +32,13 @@
 #include "isp.h"
 #include "exception.h"
 #include "uapi/explorer_uapi.h"
+
+#ifdef MTK_AON
+#include "../../aon/mtk/include/mtk_aon_sensor_core.h"
+#endif
+
 #ifdef QCOM_AON
-#include "../../aon/include/aon_sensor_core.h"
+#include "../../aon/qcom/include/qcom_aon_sensor_core.h"
 #endif
 
 /*
@@ -71,6 +76,25 @@ enum pw_mode {
 
 struct explorer_plat_data;
 
+#ifdef OPLUS_EXPLORER_NO_PROJECT
+struct timeval {
+	__kernel_old_time_t     tv_sec;         /* seconds */
+	__kernel_suseconds_t    tv_usec;        /* microseconds */
+};
+
+static inline void rtc_time_to_tm(unsigned long time, struct rtc_time *tm)
+{
+	rtc_time64_to_tm(time, tm);
+}
+
+static inline int rtc_tm_to_time(struct rtc_time *tm, unsigned long *time)
+{
+	*time = rtc_tm_to_time64(tm);
+
+	return 0;
+}
+#endif
+
 struct explorer_ops{
 	int (*send_uevent)(struct explorer_plat_data *osd, char *uevent_buf);
 	u64 (*get_timestamp)(void);
@@ -91,6 +115,9 @@ struct explorer_boot_status {
 	bool is_cc_sec_boot;
 	atomic_t flashable;
 	unsigned long start_jiffies; /*start Jiffies of this boot*/
+#ifdef SLT_ENABLE
+	bool slt_has_booted;
+#endif
 };
 
 #ifndef OPLUS_EXPLORER_PLATFORM_QCOM
@@ -107,7 +134,7 @@ struct explorer_plat_data {
 	struct explorer_ops *ops;
 	struct cspi_data *cspi;
 	struct explorer_sdio_data *sdio_data;
-#ifdef QCOM_AON
+#if defined (QCOM_AON) || defined (MTK_AON)
 	struct aon_sensor_ctrl_t *aon_data;
 #endif
 	enum ipc_bus_type bus_type;

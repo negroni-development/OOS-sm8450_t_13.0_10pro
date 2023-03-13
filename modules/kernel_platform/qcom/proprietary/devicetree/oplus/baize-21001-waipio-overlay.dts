@@ -23,7 +23,6 @@
 
 &tlmm {
   //#ifdef OPLUS_FEATURE_RF_CABLE_DETECT
-  //mael.ma@network.RF 2021/07/06 modify for rf_cable
   rf_cable0_active: rf_cable0_active {
     mux {
       pins = "gpio89";
@@ -38,7 +37,6 @@
   };
   //#endif /* OPLUS_FEATURE_RF_CABLE_DETECT */
 
-//Haojun.Zhang@BSP.Storage 2021/07/26 add for zeku explorer
   cd_pin_pulldown: cd_pin_pulldown {
     mux {
       pins = "gpio99";
@@ -186,7 +184,6 @@
 
 &soc {
   //#ifdef OPLUS_FEATURE_RF_CABLE_DETECT
-  //mael.ma@network.RF 2021/07/06 modify for rf_cable
   oplus_rf_cable {
     compatible = "oplus,rf_cable";
     interrupt-parent = <&tlmm>;
@@ -197,7 +194,6 @@
     pinctrl-0 = <&rf_cable0_active>;
   };
   //#endif /* OPLUS_FEATURE_RF_CABLE_DETECT */
-//Haojun.Zhang@BSP.Storage 2021/07/26 add for zeku explorer
   preisp: zeku,explorer@0 {
     compatible = "zeku,explorer";
     interrupt-parent = <&tlmm>;
@@ -218,7 +214,6 @@
   };
 };
 //#ifdef OPLUS_FEATURE_CHG_BASIC
-/* Brian@BSP.CHG.Misc,2021/7/16, Modify for haptic calibration */
 &pm8350b_haptics {
     qcom,fifo-vmax-mv = <8900>;
     qcom,old-steady-vmax-mv = <8900>;//8.9v

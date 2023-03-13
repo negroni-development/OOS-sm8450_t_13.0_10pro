@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -61,6 +62,10 @@
 #define PRIMARY_VBLANK_WORST_CASE_MS 34
 
 #define DEFAULT_PANEL_MIN_V_PREFILL	35
+
+/* add 10ms constant for low fps cases and use default timeout for existing cases */
+#define RSC_VSYNC_TIMEOUT_MS(x) ((x && x->cmd_config.fps < 30) ? \
+		((1000 / x->cmd_config.fps) + 10) : PRIMARY_VBLANK_WORST_CASE_MS)
 
 static struct sde_rsc_priv *rsc_prv_list[MAX_RSC_COUNT];
 static struct device *rpmh_dev[MAX_RSC_COUNT];
@@ -169,7 +174,7 @@ void sde_rsc_client_destroy(struct sde_rsc_client *client)
 			SDE_EVT32(client->id, state, rsc->current_state,
 					client->crtc_id, wait_vblank_crtc_id,
 					SDE_EVTLOG_ERROR);
-			msleep(PRIMARY_VBLANK_WORST_CASE_MS);
+			msleep(RSC_VSYNC_TIMEOUT_MS(rsc));
 		}
 	}
 	mutex_lock(&rsc->client_lock);
@@ -312,7 +317,7 @@ static u32 sde_rsc_timer_calculate(struct sde_rsc_priv *rsc,
 
 	default_prefill_lines = (rsc->cmd_config.fps *
 		DEFAULT_PANEL_MIN_V_PREFILL) / DEFAULT_PANEL_FPS;
-	if (!rsc->cmd_config.prefill_lines)
+	if ((state != SDE_RSC_VID_STATE) || !rsc->cmd_config.prefill_lines)
 		rsc->cmd_config.prefill_lines = default_prefill_lines;
 
 	pr_debug("frame fps:%d jitter_numer:%d jitter_denom:%d vtotal:%d prefill lines:%d\n",
@@ -538,7 +543,7 @@ vsync_wait:
 			SDE_EVT32(caller_client->id, rsc->current_state,
 					caller_client->crtc_id,
 					wait_vblank_crtc_id, SDE_EVTLOG_ERROR);
-			msleep(PRIMARY_VBLANK_WORST_CASE_MS);
+			msleep(RSC_VSYNC_TIMEOUT_MS(rsc));
 		} else {
 			*wait_vblank_crtc_id = rsc->primary_client->crtc_id;
 		}
@@ -585,7 +590,7 @@ static int sde_rsc_switch_to_clk(struct sde_rsc_priv *rsc,
 			rsc->hw_ops.hw_vsync(rsc, VSYNC_ENABLE, NULL, 0, 0);
 		if (!wait_vblank_crtc_id) {
 			pr_err("invalid crtc id wait pointer provided\n");
-			msleep(PRIMARY_VBLANK_WORST_CASE_MS);
+			msleep(RSC_VSYNC_TIMEOUT_MS(rsc));
 		} else {
 			*wait_vblank_crtc_id = rsc->primary_client->crtc_id;
 
@@ -600,7 +605,7 @@ static int sde_rsc_switch_to_clk(struct sde_rsc_priv *rsc,
 		/* Wait for the vsync, if the refcount is set */
 		rc = wait_event_timeout(rsc->rsc_vsync_waitq,
 			atomic_read(&rsc->rsc_vsync_wait) == 0,
-			msecs_to_jiffies(PRIMARY_VBLANK_WORST_CASE_MS*2));
+			msecs_to_jiffies(RSC_VSYNC_TIMEOUT_MS(rsc) * 2));
 		if (!rc) {
 			pr_err("Timeout waiting for vsync\n");
 			rc = -ETIMEDOUT;
@@ -686,7 +691,7 @@ vsync_wait:
 			SDE_EVT32(caller_client->id, rsc->current_state,
 					caller_client->crtc_id,
 					wait_vblank_crtc_id, SDE_EVTLOG_ERROR);
-			msleep(PRIMARY_VBLANK_WORST_CASE_MS);
+			msleep(RSC_VSYNC_TIMEOUT_MS(rsc));
 		} else {
 			*wait_vblank_crtc_id = rsc->primary_client->crtc_id;
 		}

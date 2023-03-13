@@ -434,7 +434,6 @@ static int mhi_pm_mission_mode_transition(struct mhi_controller *mhi_cntrl)
 
 	read_unlock_bh(&mhi_cntrl->pm_lock);
 
-	mhi_misc_mission_mode(mhi_cntrl);
 	mhi_process_sleeping_events(mhi_cntrl);
 
 	/*
@@ -442,6 +441,7 @@ static int mhi_pm_mission_mode_transition(struct mhi_controller *mhi_cntrl)
 	 * Execution Environment (EE) to either SBL or AMSS states
 	 */
 	mhi_create_devices(mhi_cntrl);
+	mhi_misc_mission_mode(mhi_cntrl);
 
 	read_lock_bh(&mhi_cntrl->pm_lock);
 
@@ -843,6 +843,9 @@ int mhi_pm_suspend(struct mhi_controller *mhi_cntrl)
 	mhi_cntrl->wake_get(mhi_cntrl, false);
 	read_unlock_bh(&mhi_cntrl->pm_lock);
 
+	/* finish reg writes */
+	mhi_force_reg_write(mhi_cntrl);
+
 	ret = wait_event_timeout(mhi_cntrl->state_event,
 				 mhi_cntrl->dev_state == MHI_STATE_M0 ||
 				 mhi_cntrl->dev_state == MHI_STATE_M1 ||
@@ -858,6 +861,9 @@ int mhi_pm_suspend(struct mhi_controller *mhi_cntrl)
 			"Could not enter M0/M1 state");
 		return -EIO;
 	}
+
+	/* finish any reg writes before setting M3 */
+	mhi_force_reg_write(mhi_cntrl);
 
 	write_lock_irq(&mhi_cntrl->pm_lock);
 
@@ -883,8 +889,6 @@ int mhi_pm_suspend(struct mhi_controller *mhi_cntrl)
 	write_unlock_irq(&mhi_cntrl->pm_lock);
 	MHI_LOG("Wait for M3 completion\n");
 
-	/* finish reg writes before D3 cold */
-	mhi_force_reg_write(mhi_cntrl);
 
 	ret = wait_event_timeout(mhi_cntrl->state_event,
 				 mhi_cntrl->dev_state == MHI_STATE_M3 ||

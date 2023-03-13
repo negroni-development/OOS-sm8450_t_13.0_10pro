@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (C) 2014-2021 The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
  *
@@ -663,7 +664,10 @@ int sde_plane_wait_input_fence(struct drm_plane *plane, uint32_t wait_ms)
 				break;
 			}
 
-			SDE_EVT32_VERBOSE(DRMID(plane), -ret, prefix);
+			if (ret)
+				SDE_EVT32(DRMID(plane), -ret, prefix, SDE_EVTLOG_ERROR);
+			else
+				SDE_EVT32_VERBOSE(DRMID(plane), -ret, prefix);
 		} else {
 			ret = 0;
 		}
@@ -957,8 +961,8 @@ static void _sde_plane_setup_scaler3(struct sde_plane *psde,
 	scale_cfg->uv_filter_cfg = SDE_SCALE_BIL;
 	scale_cfg->alpha_filter_cfg = SDE_SCALE_ALPHA_BIL;
 	scale_cfg->lut_flag = 0;
-	scale_cfg->blend_cfg = 1;
-	scale_cfg->enable = 1;
+	scale_cfg->blend_cfg = SDE_FORMAT_IS_FSC(fmt) ? 0 : 1;
+	scale_cfg->enable = SDE_FORMAT_IS_FSC(fmt) ? 0 : 1;
 	scale_cfg->dyn_exp_disabled = SDE_QSEED_DEFAULT_DYN_EXP;
 }
 
@@ -1811,7 +1815,8 @@ int sde_plane_validate_multirect_v2(struct sde_multirect_plane_states *plane)
 				drm_state[i]->crtc_y, drm_state[i]->crtc_w,
 				drm_state[i]->crtc_h, !q16_data);
 
-		if (src[i].w != dst[i].w || src[i].h != dst[i].h) {
+		if (!SDE_FORMAT_IS_FSC(fmt[i]) &&
+				(src[i].w != dst[i].w || src[i].h != dst[i].h)) {
 			SDE_ERROR_PLANE(sde_plane[i],
 				"scaling is not supported in multirect mode\n");
 			return -EINVAL;
@@ -1999,7 +2004,9 @@ static int sde_plane_prepare_fb(struct drm_plane *plane,
 		ret = msm_framebuffer_prepare(fb,
 				pstate->aspace);
 		if (ret) {
-			SDE_ERROR("failed to prepare framebuffer\n");
+			SDE_ERROR("failed to prepare framebuffer fb:%d plane:%d pipe:%d ret:%d\n",
+				 fb->base.id, plane->base.id, psde->pipe, ret);
+			SDE_EVT32(fb->base.id, plane->base.id, psde->pipe, ret, SDE_EVTLOG_ERROR);
 			return ret;
 		}
 	}
@@ -2426,6 +2433,10 @@ static int _sde_atomic_check_decimation_scaler(struct drm_plane_state *state,
 		return -EINVAL;
 	}
 
+	/* scaling checks are not needed for fsc formats*/
+	if (SDE_FORMAT_IS_FSC(fmt))
+		return 0;
+
 	deci_w = sde_plane_get_property(pstate, PLANE_PROP_H_DECIMATE);
 	deci_h = sde_plane_get_property(pstate, PLANE_PROP_V_DECIMATE);
 
@@ -2687,6 +2698,13 @@ static int sde_plane_sspp_atomic_check(struct drm_plane *plane,
 	if (ret)
 		return ret;
 
+	if (SDE_FORMAT_IS_FSC(fmt) && (width % 3 != 0)) {
+		SDE_ERROR_PLANE(psde,
+				"fsc width must be multiple of 3, width %d\n",
+				width);
+		return -EINVAL;
+	}
+
 	ret = _sde_atomic_check_decimation_scaler(state, psde, fmt, pstate,
 		&src, &dst, width, height);
 	if (ret)
@@ -2793,9 +2811,21 @@ static void _sde_plane_sspp_setup_sys_cache(struct sde_plane *psde,
 {
 	struct sde_sc_cfg *sc_cfg = psde->catalog->sc_cfg;
 	bool prev_rd_en;
+	u32 cache_type = SDE_SYS_CACHE_DISP;
 
-	/* Only display system cache is currently supported */
-	if (!sc_cfg[SDE_SYS_CACHE_DISP].has_sys_cache)
+	switch (sde_plane_get_property(pstate, PLANE_PROP_SYS_CACHE_TYPE)) {
+	case SDE_SYSCACHE_LLCC_DISP:
+		cache_type = SDE_SYS_CACHE_DISP;
+		break;
+	case SDE_SYSCACHE_LLCC_DISP_LEFT:
+		cache_type = SDE_SYS_CACHE_DISP_LEFT;
+		break;
+	case SDE_SYSCACHE_LLCC_DISP_RIGHT:
+		cache_type = SDE_SYS_CACHE_DISP_RIGHT;
+		break;
+	}
+
+	if (!sc_cfg[cache_type].has_sys_cache)
 		return;
 
 	prev_rd_en = pstate->sc_cfg.rd_en;
@@ -2807,30 +2837,50 @@ static void _sde_plane_sspp_setup_sys_cache(struct sde_plane *psde,
 	pstate->sc_cfg.flags = SSPP_SYS_CACHE_EN_FLAG |
 			SSPP_SYS_CACHE_SCID;
 	pstate->sc_cfg.type = SDE_SYS_CACHE_NONE;
+	pstate->sc_cfg.rd_op_type = SDE_SYS_CACHE_NORMAL_READ;
 
 	if (pstate->static_cache_state == CACHE_STATE_FRAME_WRITE) {
 		pstate->sc_cfg.rd_en = true;
-		pstate->sc_cfg.rd_scid =
-				sc_cfg[SDE_SYS_CACHE_DISP].llcc_scid;
+		pstate->sc_cfg.rd_scid = sc_cfg[cache_type].llcc_scid;
 		pstate->sc_cfg.rd_noallocate = false;
 		pstate->sc_cfg.flags = SSPP_SYS_CACHE_EN_FLAG |
 				SSPP_SYS_CACHE_SCID | SSPP_SYS_CACHE_NO_ALLOC;
-		pstate->sc_cfg.type = SDE_SYS_CACHE_DISP;
+		pstate->sc_cfg.type = cache_type;
 	} else if (pstate->static_cache_state == CACHE_STATE_FRAME_READ) {
 		pstate->sc_cfg.rd_en = true;
-		pstate->sc_cfg.rd_scid =
-				sc_cfg[SDE_SYS_CACHE_DISP].llcc_scid;
+		pstate->sc_cfg.rd_scid = sc_cfg[cache_type].llcc_scid;
 		pstate->sc_cfg.rd_noallocate = true;
 		pstate->sc_cfg.flags = SSPP_SYS_CACHE_EN_FLAG |
 				SSPP_SYS_CACHE_SCID | SSPP_SYS_CACHE_NO_ALLOC;
-		pstate->sc_cfg.type = SDE_SYS_CACHE_DISP;
+		pstate->sc_cfg.type = cache_type;
+	}
+
+	if (cache_type == SDE_SYS_CACHE_DISP_LEFT) {
+		pstate->sc_cfg.rd_en = true;
+		pstate->sc_cfg.rd_scid = sc_cfg[SDE_SYS_CACHE_DISP_LEFT].llcc_scid;
+		pstate->sc_cfg.rd_noallocate = true;
+		pstate->sc_cfg.flags = SSPP_SYS_CACHE_EN_FLAG | SSPP_SYS_CACHE_SCID |
+					SSPP_SYS_CACHE_NO_ALLOC;
+		pstate->sc_cfg.type = cache_type;
+		pstate->sc_cfg.rd_op_type = SDE_SYS_CACHE_READ_INVALIDATE;
+		pstate->sc_cfg.flags |= SSPP_SYS_CACHE_OP_TYPE;
+	} else if (cache_type == SDE_SYS_CACHE_DISP_RIGHT) {
+		pstate->sc_cfg.rd_en = true;
+		pstate->sc_cfg.rd_scid = sc_cfg[SDE_SYS_CACHE_DISP_RIGHT].llcc_scid;
+		pstate->sc_cfg.rd_noallocate = true;
+		pstate->sc_cfg.flags = SSPP_SYS_CACHE_EN_FLAG | SSPP_SYS_CACHE_SCID |
+					SSPP_SYS_CACHE_NO_ALLOC;
+		pstate->sc_cfg.type = cache_type;
+		pstate->sc_cfg.rd_op_type = SDE_SYS_CACHE_READ_INVALIDATE;
+		pstate->sc_cfg.flags |= SSPP_SYS_CACHE_OP_TYPE;
 	}
 
 	if (!pstate->sc_cfg.rd_en && !prev_rd_en)
 		return;
 
 	SDE_EVT32(DRMID(&psde->base), pstate->sc_cfg.rd_scid,
-			pstate->sc_cfg.rd_en, pstate->sc_cfg.rd_noallocate);
+			pstate->sc_cfg.rd_en, pstate->sc_cfg.rd_noallocate,
+			pstate->sc_cfg.rd_op_type);
 
 	psde->pipe_hw->ops.setup_sys_cache(
 		psde->pipe_hw, &pstate->sc_cfg);
@@ -2883,9 +2933,6 @@ static void _sde_plane_map_prop_to_dirty_bits(void)
 	/* no special action required */
 	plane_prop_array[PLANE_PROP_INFO] =
 	plane_prop_array[PLANE_PROP_ALPHA] =
-#ifdef OPLUS_BUG_STABILITY
-	plane_prop_array[PLANE_PROP_CUSTOM] =
-#endif /* OPLUS_BUG_STABILITY */
 	plane_prop_array[PLANE_PROP_INPUT_FENCE] =
 	plane_prop_array[PLANE_PROP_BLEND_OP] = 0;
 
@@ -3249,7 +3296,7 @@ static void _sde_plane_update_properties(struct drm_plane *plane,
 }
 
 static void _sde_plane_check_lut_dirty(struct sde_plane *psde,
-				struct sde_plane_state *pstate)
+	struct sde_plane_state *pstate)
 {
 	/**
 	* Valid configuration if scaler is not enabled or
@@ -3727,11 +3774,11 @@ static void _sde_plane_setup_capabilities_blob(struct sde_plane *psde,
 	sde_kms_info_add_keyint(info, "max_per_pipe_bw_high",
 			psde->pipe_sblk->max_per_pipe_bw_high * 1000LL);
 
-	if (psde->pipe <= SSPP_VIG3 && psde->pipe >= SSPP_VIG0)
+	if (SDE_SSPP_VALID_VIG(psde->pipe))
 		pipe_id = psde->pipe -  SSPP_VIG0;
-	else if (psde->pipe <= SSPP_RGB3 && psde->pipe >= SSPP_RGB0)
+	else if (SDE_SSPP_VALID_RGB(psde->pipe))
 		pipe_id = psde->pipe -  SSPP_RGB0;
-	else if (psde->pipe <= SSPP_DMA3 && psde->pipe >= SSPP_DMA0)
+	else if (SDE_SSPP_VALID_DMA(psde->pipe))
 		pipe_id = psde->pipe -  SSPP_DMA0;
 	else
 		pipe_id = -1;
@@ -3808,6 +3855,12 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 		{SDE_SSPP_MULTIRECT_PARALLEL, "parallel"},
 		{SDE_SSPP_MULTIRECT_TIME_MX,  "serial"},
 	};
+
+	static const struct drm_prop_enum_list e_syscache_type[] = {
+		{SDE_SYSCACHE_LLCC_DISP, "llcc_disp"},
+		{SDE_SYSCACHE_LLCC_DISP_LEFT, "disp_left"},
+		{SDE_SYSCACHE_LLCC_DISP_RIGHT,  "disp_right"},
+	};
 	struct sde_kms_info *info;
 	struct sde_plane *psde = to_sde_plane(plane);
 	bool is_master;
@@ -3829,7 +3882,7 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 	psde->catalog = catalog;
 	is_master = !psde->is_virtual;
 
-	info = kzalloc(sizeof(struct sde_kms_info), GFP_KERNEL);
+	info = vzalloc(sizeof(struct sde_kms_info));
 	if (!info) {
 		SDE_ERROR("failed to allocate info memory\n");
 		return;
@@ -3853,11 +3906,6 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 	msm_property_install_range(&psde->property_info, "zpos",
 		0x0, 0, zpos_max, zpos_def, PLANE_PROP_ZPOS);
 
-
-#ifdef OPLUS_BUG_STABILITY
-	msm_property_install_range(&psde->property_info,"PLANE_CUST",
-		0x0, 0, INT_MAX, 0, PLANE_PROP_CUSTOM);
-#endif
 	msm_property_install_range(&psde->property_info, "alpha",
 		0x0, 0, 255, 255, PLANE_PROP_ALPHA);
 
@@ -3885,6 +3933,10 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 	msm_property_install_enum(&psde->property_info, "src_config", 0x0, 1,
 		e_src_config, ARRAY_SIZE(e_src_config), 0,
 		PLANE_PROP_SRC_CONFIG);
+
+	msm_property_install_enum(&psde->property_info, "syscache_type", 0x0,
+		0, e_syscache_type, ARRAY_SIZE(e_syscache_type), 0,
+		PLANE_PROP_SYS_CACHE_TYPE);
 
 	if (psde->pipe_hw->ops.setup_solidfill)
 		msm_property_install_range(&psde->property_info, "color_fill",
@@ -3916,7 +3968,7 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 	if (psde->pipe_hw->ops.set_ubwc_stats_roi)
 		msm_property_install_range(&psde->property_info, "ubwc_stats_roi",
 				0, 0, 0xFFFFFFFF, 0, PLANE_PROP_UBWC_STATS_ROI);
-	kfree(info);
+	vfree(info);
 }
 
 static inline void _sde_plane_set_csc_v1(struct sde_plane *psde,
@@ -4132,27 +4184,34 @@ static void _sde_plane_set_excl_rect_v1(struct sde_plane *psde,
 }
 
 static void _sde_plane_set_ubwc_stats_roi(struct sde_plane *psde,
-		struct sde_plane_state *pstate, uint64_t roi)
+		struct sde_plane_state *pstate, void __user *usr_ptr)
 {
-	uint16_t y0, y1;
+	struct sde_drm_ubwc_stats_roi roi = {0};
 
 	if (!psde || !pstate) {
 		SDE_ERROR("invalid argument(s)\n");
 		return;
 	}
 
-	y0 = roi & 0xFFFF;
-	y1 = (roi >> 0x10) & 0xFFFF;
-
-	if (y0 > psde->pipe_cfg.src_rect.h || y1 > psde->pipe_cfg.src_rect.h) {
-		SDE_ERROR_PLANE(psde, "invalid ubwc roi y0 0x%x, y1 0x%x, src height 0x%x",
-				y0, y1, psde->pipe_cfg.src_rect.h);
-		y0 = 0;
-		y1 = 0;
+	if (!usr_ptr) {
+		SDE_DEBUG_PLANE(psde, "ubwc roi disabled");
+		goto end;
 	}
 
-	pstate->ubwc_stats_roi.y_coord0 = y0;
-	pstate->ubwc_stats_roi.y_coord1 = y1;
+	if (copy_from_user(&roi, usr_ptr, sizeof(roi))) {
+		SDE_ERROR_PLANE(psde, "failed to copy ubwc stats roi");
+		return;
+	}
+
+	if (roi.y_coord0 > psde->pipe_cfg.src_rect.h || roi.y_coord1 > psde->pipe_cfg.src_rect.h) {
+		SDE_ERROR_PLANE(psde, "invalid ubwc roi y0 0x%x, y1 0x%x, src height 0x%x",
+				roi.y_coord0, roi.y_coord1, psde->pipe_cfg.src_rect.h);
+		memset(&roi, 0, sizeof(roi));
+	}
+
+end:
+	SDE_EVT32(psde, roi.y_coord0, roi.y_coord1);
+	memcpy(&pstate->ubwc_stats_roi, &roi, sizeof(struct sde_drm_ubwc_stats_roi));
 }
 
 static int sde_plane_atomic_set_property(struct drm_plane *plane,
@@ -4197,7 +4256,8 @@ static int sde_plane_atomic_set_property(struct drm_plane *plane,
 						(void *)(uintptr_t)val);
 				break;
 			case PLANE_PROP_UBWC_STATS_ROI:
-				_sde_plane_set_ubwc_stats_roi(psde, pstate, val);
+				_sde_plane_set_ubwc_stats_roi(psde, pstate,
+						(void __user *)(uintptr_t)val);
 				break;
 			default:
 				/* nothing to do */
@@ -4767,6 +4827,7 @@ struct drm_plane *sde_plane_init(struct drm_device *dev,
 	struct msm_drm_private *priv;
 	struct sde_kms *kms;
 	enum drm_plane_type type;
+	struct sde_vbif_clk_client clk_client;
 	int ret = -EINVAL;
 
 	if (!dev) {
@@ -4812,8 +4873,8 @@ struct drm_plane *sde_plane_init(struct drm_device *dev,
 	}
 
 	/* initialize underlying h/w driver */
-	psde->pipe_hw = sde_hw_sspp_init(pipe, kms->mmio, kms->catalog,
-							psde->is_virtual);
+	psde->pipe_hw = sde_hw_sspp_init(pipe, kms->mmio, kms->catalog, psde->is_virtual,
+			&clk_client);
 	if (IS_ERR(psde->pipe_hw)) {
 		SDE_ERROR("[%u]SSPP init failed\n", pipe);
 		ret = PTR_ERR(psde->pipe_hw);
@@ -4821,6 +4882,15 @@ struct drm_plane *sde_plane_init(struct drm_device *dev,
 	} else if (!psde->pipe_hw->cap || !psde->pipe_hw->cap->sblk) {
 		SDE_ERROR("[%u]SSPP init returned invalid cfg\n", pipe);
 		goto clean_sspp;
+	}
+
+	if (kms->catalog->has_vbif_clk_split) {
+		ret = sde_vbif_clk_register(kms, &clk_client);
+		if (ret) {
+			SDE_ERROR("failed to register vbif client %d\n",
+					clk_client.clk_ctrl);
+			goto clean_sspp;
+		}
 	}
 
 	/* cache features mask for later */

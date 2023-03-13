@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2020-2021,, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
  */
 
 #ifndef _MSM_VIDC_DRIVER_H_
@@ -11,6 +12,7 @@
 #include "msm_vidc_internal.h"
 #include "msm_vidc_core.h"
 #include "msm_vidc_inst.h"
+#include "msm_vidc_platform.h"
 
 #define MSM_VIDC_SESSION_INACTIVE_THRESHOLD_MS 1000
 #define HEIC_GRID_DIMENSION 512
@@ -65,6 +67,12 @@ static inline is_input_meta_buffer(enum msm_vidc_buffer_type buffer_type)
 static inline is_output_meta_buffer(enum msm_vidc_buffer_type buffer_type)
 {
 	return buffer_type == MSM_VIDC_BUF_OUTPUT_META;
+}
+
+static inline is_ts_reorder_allowed(struct msm_vidc_inst *inst)
+{
+	return !!(inst->capabilities->cap[TS_REORDER].value &&
+		is_decode_session(inst) && !is_image_session(inst));
 }
 
 static inline is_scaling_enabled(struct msm_vidc_inst *inst)
@@ -187,11 +195,6 @@ static inline bool is_rgba_colorformat(enum msm_vidc_colorformat_type colorforma
 {
 	return colorformat == MSM_VIDC_FMT_RGBA8888 ||
 		colorformat == MSM_VIDC_FMT_RGBA8888C;
-}
-
-static inline bool is_secondary_output_mode(struct msm_vidc_inst *inst)
-{
-	return false; // TODO: inst->stream_output_mode == HAL_VIDEO_DECODER_SECONDARY;
 }
 
 static inline bool is_thumbnail_session(struct msm_vidc_inst *inst)
@@ -322,7 +325,10 @@ int msm_vidc_smmu_fault_handler(struct iommu_domain *domain,
 int msm_vidc_trigger_ssr(struct msm_vidc_core *core,
 		u64 trigger_ssr_val);
 void msm_vidc_ssr_handler(struct work_struct *work);
-void msm_vidc_pm_work_handler(struct work_struct *work);
+int msm_vidc_trigger_stability(struct msm_vidc_core *core,
+		u64 trigger_stability_val);
+void msm_vidc_stability_handler(struct work_struct *work);
+int cancel_stability_work_sync(struct msm_vidc_inst *inst);
 void msm_vidc_fw_unload_handler(struct work_struct *work);
 int msm_vidc_suspend(struct msm_vidc_core *core);
 void msm_vidc_batch_handler(struct work_struct *work);
@@ -422,11 +428,16 @@ void msm_vidc_allow_dcvs(struct msm_vidc_inst *inst);
 bool msm_vidc_allow_decode_batch(struct msm_vidc_inst *inst);
 int msm_vidc_check_session_supported(struct msm_vidc_inst *inst);
 int msm_vidc_check_core_mbps(struct msm_vidc_inst *inst);
+int msm_vidc_check_core_mbpf(struct msm_vidc_inst *inst);
 int msm_vidc_check_scaling_supported(struct msm_vidc_inst *inst);
 int msm_vidc_update_timestamp(struct msm_vidc_inst *inst, u64 timestamp);
 int msm_vidc_set_auto_framerate(struct msm_vidc_inst *inst, u64 timestamp);
 int msm_vidc_calc_window_avg_framerate(struct msm_vidc_inst *inst);
 int msm_vidc_flush_ts(struct msm_vidc_inst *inst);
+int msm_vidc_ts_reorder_insert_timestamp(struct msm_vidc_inst *inst, u64 timestamp);
+int msm_vidc_ts_reorder_remove_timestamp(struct msm_vidc_inst *inst, u64 timestamp);
+int msm_vidc_ts_reorder_get_first_timestamp(struct msm_vidc_inst *inst, u64 *timestamp);
+int msm_vidc_ts_reorder_flush(struct msm_vidc_inst *inst);
 const char *buf_name(enum msm_vidc_buffer_type type);
 void msm_vidc_free_capabililty_list(struct msm_vidc_inst *inst,
 	enum msm_vidc_ctrl_list_type list_type);
@@ -439,5 +450,6 @@ bool res_is_less_than(u32 width, u32 height,
 bool res_is_less_than_or_equal_to(u32 width, u32 height,
 	u32 ref_width, u32 ref_height);
 int msm_vidc_get_properties(struct msm_vidc_inst *inst);
+int msm_vidc_get_src_clk_scaling_ratio(struct msm_vidc_core *core);
 #endif // _MSM_VIDC_DRIVER_H_
 

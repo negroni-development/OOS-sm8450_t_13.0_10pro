@@ -10,7 +10,7 @@
 #include <linux/sched.h>
 #include <linux/list.h>
 #include <linux/types.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 #include <linux/hashtable.h>
 #if IS_ENABLED(CONFIG_SCHED_WALT)
 #include <linux/sched/walt.h>
@@ -18,14 +18,14 @@
 
 
 #define ux_err(fmt, ...) \
-		printk(KERN_ERR "[sched_assist_error][%s]"fmt, __func__, ##__VA_ARGS__)
+		pr_err("[sched_assist][%s]"fmt, __func__, ##__VA_ARGS__)
 #define ux_warn(fmt, ...) \
-		printk(KERN_WARNING "[sched_assist_warn][%s]"fmt, __func__, ##__VA_ARGS__)
+		pr_warn("[sched_assist][%s]"fmt, __func__, ##__VA_ARGS__)
 #define ux_debug(fmt, ...) \
-		printk(KERN_INFO "[sched_assist_info][%s]"fmt, __func__, ##__VA_ARGS__)
+		pr_info("[sched_assist][%s]"fmt, __func__, ##__VA_ARGS__)
 
-#define UX_MSG_LEN					64
-#define UX_DEPTH_MAX				5
+#define UX_MSG_LEN		64
+#define UX_DEPTH_MAX		5
 
 /* define for debug */
 #define DEBUG_SYSTRACE (1 << 0)
@@ -42,9 +42,9 @@
 #define SA_TYPE_LIGHT				(1 << 0)
 #define SA_TYPE_HEAVY				(1 << 1)
 #define SA_TYPE_ANIMATOR			(1 << 2)
-#define SA_TYPE_LISTPICK 			(1 << 3)
+#define SA_TYPE_LISTPICK			(1 << 3)
 #define SA_TYPE_ONCE				(1 << 4) /* clear ux type when dequeue */
-#define SA_OPT_SET				(1 << 7)
+#define SA_OPT_SET					(1 << 7)
 #define SA_TYPE_INHERIT				(1 << 8)
 
 #define SCHED_ASSIST_UX_MASK		(0xFF)
@@ -67,8 +67,7 @@ extern unsigned int top_app_type;
 /* define for boost threshold unit */
 #define BOOST_THRESHOLD_UNIT (51)
 
-enum UX_STATE_TYPE
-{
+enum UX_STATE_TYPE {
 	UX_STATE_INVALID = 0,
 	UX_STATE_NONE,
 	UX_STATE_SCHED_ASSIST,
@@ -76,23 +75,23 @@ enum UX_STATE_TYPE
 	MAX_UX_STATE_TYPE,
 };
 
-enum INHERIT_UX_TYPE
-{
+enum INHERIT_UX_TYPE {
 	INHERIT_UX_BINDER = 0,
 	INHERIT_UX_RWSEM,
 	INHERIT_UX_MUTEX,
 	INHERIT_UX_MAX,
 };
 
-/* new flag should be add before MAX_IM_FLAG_TYPE, never change the value of those existed flag type. */
-enum IM_FLAG_TYPE
-{
+/* WANNING: new flag should be add before MAX_IM_FLAG_TYPE, never change the value of those existed flag type. */
+enum IM_FLAG_TYPE {
 	IM_FLAG_NONE = 0,
 	IM_FLAG_SURFACEFLINGER,
-	IM_FLAG_HWC,
+	IM_FLAG_HWC,			/* Discarded */
 	IM_FLAG_RENDERENGINE,
 	IM_FLAG_WEBVIEW,
 	IM_FLAG_CAMERA_HAL,
+	IM_FLAG_3RD_AUDIO,
+	IM_FLAG_HWBINDER,
 	MAX_IM_FLAG_TYPE,
 };
 
@@ -109,29 +108,49 @@ struct ux_sched_cputopo {
 	struct ux_sched_cluster sched_cls[OPLUS_NR_CPUS];
 };
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
+/* hot-thread */
+struct task_record {
+#define RECOED_WINSIZE			(1 << 8)
+#define RECOED_WINIDX_MASK		(RECOED_WINSIZE - 1)
+	u8 winidx;
+	u8 count;
+};
+#endif
+
 /* Please add your own members of task_struct here :) */
 struct oplus_task_struct {
+	/* CONFIG_OPLUS_FEATURE_SCHED_ASSIST */
 	struct list_head ux_entry;
 	atomic64_t inherit_ux;
-	u64 enqueue_time; /* remove */
-	u64 inherit_ux_start; /* remove */
+	u64 enqueue_time;
+	u64 inherit_ux_start;
 	u64 sum_exec_baseline;
 	u64 total_exec;
 	int ux_state;
 	int ux_depth;
 	int im_flag;
 	int tpd; /* task placement decision */
-#ifdef CONFIG_OPLUS_FEATURE_SCHED_SPREAD
+	/* CONFIG_OPLUS_FEATURE_SCHED_SPREAD */
 	int lb_state;
 	int ld_flag;
-#endif /* CONFIG_OPLUS_FEATURE_SCHED_SPREAD */
-	u64 exec_calc_runtime;
+	/* CONFIG_OPLUS_FEATURE_TASK_LOAD */
 	int is_update_runtime;
 	int target_process;
-
+	u64 wake_tid;
+	u64 running_start_time;
+	u64 exec_calc_runtime;
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)
+	struct task_record record[OPLUS_NR_CPUS];	/* 2*u64 */
+#endif
+	/* CONFIG_OPLUS_FEATURE_FRAME_BOOST */
+	struct list_head fbg_list;
+	unsigned int fbg_state;
+	int fbg_depth;
 };
 
 struct oplus_rq {
+	/* CONFIG_OPLUS_FEATURE_SCHED_ASSIST */
 	struct list_head ux_list;
 };
 
@@ -152,20 +171,9 @@ static inline bool oplus_list_empty(struct list_head *list)
 		((struct task_struct *)(__mptr - \
 		offsetof(struct task_struct, android_oem_data1))); })
 
-static inline struct oplus_task_struct* get_oplus_task_struct(struct task_struct *t)
+static inline struct oplus_task_struct *get_oplus_task_struct(struct task_struct *t)
 {
 	return (struct oplus_task_struct *) t->android_oem_data1;
-}
-
-static inline struct task_struct* get_task_struct_from_ux_entry(struct list_head *head_pos)
-{
-	struct oplus_task_struct *ots;
-	struct task_struct *t;
-
-	ots = list_entry(head_pos, struct oplus_task_struct, ux_entry);
-	t = list_entry(ots, struct task_struct, android_oem_data1);
-
-	return t;
 }
 
 static inline int oplus_get_im_flag(struct task_struct *t)
@@ -173,6 +181,14 @@ static inline int oplus_get_im_flag(struct task_struct *t)
 	struct oplus_task_struct *ots = get_oplus_task_struct(t);
 
 	return ots->im_flag;
+}
+
+static inline bool is_optimized_audio_thread(struct task_struct *t)
+{
+	if (oplus_get_im_flag(t) == IM_FLAG_3RD_AUDIO)
+		return true;
+
+        return false;
 }
 
 static inline void oplus_set_im_flag(struct task_struct *t, int im_flag)
@@ -211,7 +227,7 @@ static inline void oplus_set_inherit_ux(struct task_struct *t, s64 inherit_ux)
 }
 
 
-static inline struct list_head * oplus_get_ux_entry(struct task_struct *t)
+static inline struct list_head *oplus_get_ux_entry(struct task_struct *t)
 {
 	struct oplus_task_struct *ots = get_oplus_task_struct(t);
 
@@ -282,10 +298,11 @@ static inline void init_task_ux_info(struct task_struct *t)
 	ots->lb_state = 0;
 	ots->ld_flag = 0;
 #endif
-
 	ots->exec_calc_runtime = 0;
 	ots->is_update_runtime = 0;
 	ots->target_process = -1;
+	ots->wake_tid = 0;
+	ots->running_start_time = 0;
 }
 
 static inline bool test_sched_assist_ux_type(struct task_struct *task, unsigned int sa_ux_type)
@@ -318,10 +335,6 @@ static inline bool sched_assist_scene(unsigned int scene)
 {
 	if (unlikely(!global_sched_assist_enabled))
 		return false;
-	/*
-	if (scene == SA_SLIDE)
-		return sysctl_slide_boost_enabled;
-	*/
 
 	return global_sched_assist_scene & scene;
 }
@@ -341,53 +354,61 @@ static inline unsigned long oplus_task_util(struct task_struct *p)
 static inline u32 task_wts_sum(struct task_struct *tsk)
 {
 	struct walt_task_struct *wts = (struct walt_task_struct *) tsk->android_vendor_data1;
+
 	return wts->sum;
 }
 #endif
+void hwbinder_systrace_c(unsigned int cpu, int flag);
+void sched_assist_init_oplus_rq(void);
+void queue_ux_thread(struct rq *rq, struct task_struct *p, int enqueue);
 
-extern void sched_assist_init_oplus_rq(void);
-extern void queue_ux_thread(struct rq *rq, struct task_struct *p, int enqueue);
+void inherit_ux_inc(struct task_struct *task, int type);
+void inherit_ux_sub(struct task_struct *task, int type, int value);
+void set_inherit_ux(struct task_struct *task, int type, int depth, int inherit_val);
+void reset_inherit_ux(struct task_struct *inherit_task, struct task_struct *ux_task, int reset_type);
+void unset_inherit_ux(struct task_struct *task, int type);
+void unset_inherit_ux_value(struct task_struct *task, int type, int value);
+void inc_inherit_ux_refs(struct task_struct *task, int type);
+void clear_all_inherit_type(struct task_struct *p);
 
-extern void inherit_ux_inc(struct task_struct *task, int type);
-extern void inherit_ux_sub(struct task_struct *task, int type, int value);
-extern void set_inherit_ux(struct task_struct *task, int type, int depth, int inherit_val);
-extern void reset_inherit_ux(struct task_struct *inherit_task, struct task_struct *ux_task, int reset_type);
-extern void unset_inherit_ux(struct task_struct *task, int type);
-extern void unset_inherit_ux_value(struct task_struct *task, int type, int value);
-extern void inc_inherit_ux_refs(struct task_struct *task, int type);
+bool test_task_is_fair(struct task_struct *task);
+bool test_task_is_rt(struct task_struct *task);
 
-extern bool test_task_is_fair(struct task_struct *task);
-extern bool test_task_is_rt(struct task_struct *task);
+bool prio_higher(int a, int b);
+bool test_task_ux(struct task_struct *task);
+bool test_task_ux_depth(int ux_depth);
+bool test_inherit_ux(struct task_struct *task, int type);
+bool test_set_inherit_ux(struct task_struct *task);
+bool test_task_identify_ux(struct task_struct *task, int id_type_ux);
+bool test_list_pick_ux(struct task_struct *task);
+int get_ux_state_type(struct task_struct *task);
+void sched_assist_target_comm(struct task_struct *task, const char *buf);
 
-extern bool prio_higher(int a, int b);
-extern bool test_task_ux(struct task_struct *task);
-extern bool test_task_ux_depth(int ux_depth);
-extern bool test_inherit_ux(struct task_struct *task, int type);
-extern bool test_set_inherit_ux(struct task_struct *task);
-extern bool test_task_identify_ux(struct task_struct *task, int id_type_ux);
-extern bool test_list_pick_ux(struct task_struct *task);
-extern int get_ux_state_type(struct task_struct *task);
-extern void sched_assist_target_comm(struct task_struct *task, const char *buf);
+void update_ux_sched_cputopo(void);
+bool is_task_util_over(struct task_struct *tsk, int threshold);
+bool oplus_task_misfit(struct task_struct *tsk, int cpu);
+ssize_t oplus_show_cpus(const struct cpumask *mask, char *buf);
+void adjust_rt_lowest_mask(struct task_struct *p, struct cpumask *local_cpu_mask, int ret, bool force_adjust);
+bool sa_skip_rt_sync(struct rq *rq, struct task_struct *p, bool *sync);
 
-extern void update_ux_sched_cputopo(void);
-extern bool is_task_util_over(struct task_struct *tsk, int threshold);
-extern bool oplus_task_misfit(struct task_struct *tsk, int cpu);
-extern ssize_t oplus_show_cpus(const struct cpumask *mask, char *buf);
-extern void adjust_rt_lowest_mask(struct task_struct *p, struct cpumask *local_cpu_mask, int ret, bool force_adjust);
-
-extern void account_ux_runtime(struct rq *rq, struct task_struct *curr);
+void account_ux_runtime(struct rq *rq, struct task_struct *curr);
 
 /* register vender hook in kernel/sched/topology.c */
-extern void android_vh_build_sched_domains_handler(void *unused, bool has_asym);
+void android_vh_build_sched_domains_handler(void *unused, bool has_asym);
 
 /* register vender hook in kernel/sched/rt.c */
-extern void android_rvh_select_task_rq_rt_handler(void *unused, struct task_struct *p, int prev_cpu, int sd_flag, int wake_flags, int *new_cpu);
-extern void android_rvh_find_lowest_rq_handler(void *unused, struct task_struct *p, struct cpumask *local_cpu_mask, int ret, int *best_cpu);
+void android_rvh_select_task_rq_rt_handler(void *unused, struct task_struct *p, int prev_cpu, int sd_flag, int wake_flags, int *new_cpu);
+void android_rvh_find_lowest_rq_handler(void *unused, struct task_struct *p, struct cpumask *local_cpu_mask, int ret, int *best_cpu);
 
 /* register vender hook in kernel/sched/core.c */
-extern void android_rvh_sched_fork_handler(void *unused, struct task_struct *p);
-extern void android_rvh_enqueue_task_handler(void *unused, struct rq *rq, struct task_struct *p, int flags);
-extern void android_rvh_dequeue_task_handler(void *unused, struct rq *rq, struct task_struct *p, int flags);
-extern void android_rvh_schedule_handler(void *unused, struct task_struct *prev, struct task_struct *next, struct rq *rq);
-extern void android_vh_scheduler_tick_handler(void *unused, struct rq *rq);
-#endif
+void android_rvh_sched_fork_handler(void *unused, struct task_struct *p);
+void android_rvh_enqueue_task_handler(void *unused, struct rq *rq, struct task_struct *p, int flags);
+void android_rvh_dequeue_task_handler(void *unused, struct rq *rq, struct task_struct *p, int flags);
+void android_rvh_schedule_handler(void *unused, struct task_struct *prev, struct task_struct *next, struct rq *rq);
+void android_vh_scheduler_tick_handler(void *unused, struct rq *rq);
+
+/* register vendor hook in kernel/cgroup/cgroup-v1.c */
+void android_vh_cgroup_set_task_handler(void *unused, int ret, struct task_struct *task);
+/* register vendor hook in kernel/signal.c  */
+void android_vh_do_send_sig_handler(void *unused, int sig, struct task_struct *p, struct task_struct *cur);
+#endif /* _OPLUS_SA_COMMON_H_ */

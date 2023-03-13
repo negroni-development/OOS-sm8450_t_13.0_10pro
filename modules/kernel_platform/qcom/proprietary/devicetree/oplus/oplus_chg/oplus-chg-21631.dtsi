@@ -1,17 +1,24 @@
 //ifdef OPLUS_FEATURE_CHG_BASIC
-//Jianchao.Shi@BSP.CHG.Basic, 2021/05/29, sjc Add for charging, 1+
 
 #include "oplus_chg_21631.h"
 
-//#ifdef OPLUS_FEATURE_CHG_BASIC /* Jianchao.Shi@BSP.CHG.Basic, 2020/05/20, sjc Add for charging */
 &soc {
 	oplus,adsp-voocphy {
 		compatible = "oplus,adsp-voocphy";
 	};
+
+	oplus,track-charge {
+		compatible = "oplus,track-charge";
+		track,fast_chg_break_t_thd = <1000>;
+		track,general_chg_break_t_thd = <200>;
+		track,voocphy_type = <1>;
+		track,wired_max_power = <65000>;
+		track,wired_fast_chg_scheme = <1>;
+	};
 };
 
 &battery_charger {
-	//for oppo chg framework:
+	//for oplus chg framework:
 	oplus,chg_ops = "plat-pmic";
 	qcom,smart_charging_screenoff;
 	qcom,voocphy_support = <1>;
@@ -208,7 +215,8 @@
 	qcom,chg_ctrl_by_vooc;
 	qcom,chg_ctrl_by_camera;
 	qcom,sw_vfloat_over_protect_enable;
-	qcom,usbtemp_batttemp_gap = <10>;
+	qcom,usbtemp_batttemp_gap = <12>;
+	qcom,fg_info_package_read_support;
 
 	//for PD9V or QC9V
 	//qcom,vbatt_pdqc_to_5v_thr = <4100>;
@@ -225,6 +233,76 @@
 	pinctrl-1 = <&dischg_disable>;
 	pinctrl-2 = <&usbtemp_l_gpio_default>;
 	pinctrl-3 = <&usbtemp_r_gpio_default>;
+	qcom,vooc-max-input-volt-support = <10000>;     //10V
+	qcom,vooc-max-input-current-support = <6500>;   //6.5A
+	vooc_charge_strategy_30w {
+		strategy_1 {
+			capacity_range = <0 75>;
+			temp_range = <120 160>;
+			input_current = <4000 4450 0
+					3000 4470 0
+					2000 4480 0>;
+			};
+		strategy_2 {
+			capacity_range = <0 75>;
+			temp_range = <160 410>;
+			input_current = <6000 4200 900
+					5000 4200 0
+					4500 4450 0
+					4000 4450 0
+					3000 4470 0
+					2000 4480 0>;
+		};
+		strategy_3 {
+			capacity_range = <0 75>;
+			temp_range = <410 420>;
+			input_current = <4000 4470 0
+					2000 4480 0>;
+		};
+		strategy_4 {
+			capacity_range = <0 75>;
+			temp_range = <420 425>;
+			input_current = <4000 4480 0>;
+		};
+		strategy_5 {
+			capacity_range = <0 75>;
+			temp_range = <425 435>;
+			input_current = <3000 4480 0>;
+		};
+	};
+
+	vooc_charge_strategy_65w {
+		strategy_1 {
+			capacity_range = <0 50>;
+			temp_range = <120 160>;
+			input_current = <6000 4200 0
+					4000 4454 0
+					2000 4494 0
+					1500 4500 0>;
+		};
+		strategy_2 {
+			capacity_range = <0 50>;
+			temp_range = <160 370>;
+			input_current = <6500 4200 0
+					6000 4250 300
+					5500 4300 400
+					4500 4454 780
+					3500 4454 0
+					2000 4494 0
+					1500 4500 0>;
+		};
+		strategy_3 {
+			capacity_range = <0 90>;
+			temp_range = <370 430>;
+			input_current = <6500 4200 0
+					6000 4250 300
+					5500 4300 400
+					4500 4454 780
+					3500 4454 0
+					2000 4494 0
+					1600 4500 0>;
+		};
+	};
 	pps_charge_strategy {
 		strategy_soc_0_to_50 {
 			strategy_temp_0_to_50 =		<10000 4180 2000 0 0
@@ -349,7 +427,6 @@
 		//drive-push-pull;//CMOS
 	};
 };
-//#endif OPLUS_FEATURE_CHG_BASIC
 
 //wireless support, 21613 not use, just for chg framework support
 &battery_charger {
@@ -404,7 +481,7 @@
 		0x0f 0x70
 		0x17 0x74
 		0x03 0x78>;
-};//Jichen.Pan@BSP.CHG.Basic: Add for USB OTG eye diagram
+};
 
 //modify for usb2.0
 /*&usb_qmp_dp_phy {

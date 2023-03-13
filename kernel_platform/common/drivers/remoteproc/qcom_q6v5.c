@@ -51,7 +51,6 @@ static struct workqueue_struct *crash_report_workqueue = NULL;
 #endif
 
 #ifdef OPLUS_FEATURE_MODEM_MINIDUMP
-//Add for customized subsystem ramdump to skip generate dump cause by SAU
 #define MAX_SSR_REASON_LEN	256U
 #define MAX_SSR_DEFAULT_REASON_LEN 16
 #define REMOTEPROC_MSS "remoteproc-mss"
@@ -229,6 +228,12 @@ int qcom_q6v5_unprepare(struct qcom_q6v5 *q6v5)
 }
 EXPORT_SYMBOL_GPL(qcom_q6v5_unprepare);
 
+void qcom_q6v5_register_ssr_subdev(struct qcom_q6v5 *q6v5, struct rproc_subdev *ssr_subdev)
+{
+	q6v5->ssr_subdev = ssr_subdev;
+}
+EXPORT_SYMBOL(qcom_q6v5_register_ssr_subdev);
+
 static void qcom_q6v5_crash_handler_work(struct work_struct *work)
 {
 	struct qcom_q6v5 *q6v5 = container_of(work, struct qcom_q6v5, crash_handler);
@@ -248,15 +253,16 @@ static void qcom_q6v5_crash_handler_work(struct work_struct *work)
 
 	votes = atomic_xchg(&rproc->power, 0);
 	/* if votes are zero, rproc has already been shutdown */
-	if (votes == 0)
-		goto rproc_unlock;
+	if (votes == 0) {
+		mutex_unlock(&rproc->lock);
+		return;
+	}
 
 	list_for_each_entry_reverse(subdev, &rproc->subdevs, node) {
 		if (subdev->stop)
 			subdev->stop(subdev, true);
 	}
 
-rproc_unlock:
 	mutex_unlock(&rproc->lock);
 
 	/*
@@ -327,7 +333,6 @@ static irqreturn_t q6v5_wdog_interrupt(int irq, void *data)
 	if (!IS_ERR(msg) && len > 0 && msg[0]) {
 		strlcpy(reason, msg, min(len, (size_t)MAX_SSR_REASON_LEN));
 		dev_err(q6v5->dev, "%s subsystem failure reason: %s.\n", name, reason);
-		//Add for customized subsystem ramdump to skip generate dump cause by SAU
 		if (strstr(name, REMOTEPROC_MSS)) {
 			mdmreason_set(reason);
 			dev_err(q6v5->dev, "debug modem subsystem failure reason: %s.\n", reason);
@@ -347,7 +352,6 @@ static irqreturn_t q6v5_wdog_interrupt(int irq, void *data)
 	}
 	else {
 		dev_err(q6v5->dev, "%s SFR: (unknown, empty string found).\n", name);
-		//if (!strncmp(name, "modem", 5) || !strncmp(name, "adsp", 4)) {
 		if (strstr(name, REMOTEPROC_ADSP) || strstr(name, REMOTEPROC_MSS)) {
 			subsystem_schedule_crash_uevent_work(q6v5->dev, name, 0);
 		}
@@ -355,11 +359,14 @@ static irqreturn_t q6v5_wdog_interrupt(int irq, void *data)
 	#endif
 
 	q6v5->running = false;
-
-	if (q6v5->rproc->recovery_disabled)
+	if (q6v5->rproc->recovery_disabled) {
 		schedule_work(&q6v5->crash_handler);
-	else
+	} else {
+		if (q6v5->ssr_subdev)
+			qcom_notify_early_ssr_clients(q6v5->ssr_subdev);
+
 		rproc_report_crash(q6v5->rproc, RPROC_WATCHDOG);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -402,7 +409,6 @@ static irqreturn_t q6v5_fatal_interrupt(int irq, void *data)
 	if (!IS_ERR(msg) && len > 0 && msg[0]) {
 		strlcpy(reason, msg, min(len, (size_t)MAX_SSR_REASON_LEN));
 		dev_err(q6v5->dev, "%s subsystem failure reason: %s.\n", name, reason);
-		//Add for customized subsystem ramdump to skip generate dump cause by SAU
 		if (strstr(name, REMOTEPROC_MSS)) {
 			mdmreason_set(reason);
 			dev_err(q6v5->dev, "debug modem subsystem failure reason: %s.\n", reason);
@@ -430,10 +436,14 @@ static irqreturn_t q6v5_fatal_interrupt(int irq, void *data)
 	#endif
 
 	q6v5->running = false;
-	if (q6v5->rproc->recovery_disabled)
+	if (q6v5->rproc->recovery_disabled) {
 		schedule_work(&q6v5->crash_handler);
-	else
+	} else {
+		if (q6v5->ssr_subdev)
+			qcom_notify_early_ssr_clients(q6v5->ssr_subdev);
+
 		rproc_report_crash(q6v5->rproc, RPROC_FATAL_ERROR);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -557,6 +567,7 @@ int qcom_q6v5_init(struct qcom_q6v5 *q6v5, struct platform_device *pdev,
 	q6v5->dev = &pdev->dev;
 	q6v5->crash_reason = crash_reason;
 	q6v5->handover = handover;
+	q6v5->ssr_subdev = NULL;
 
 	init_completion(&q6v5->start_done);
 	init_completion(&q6v5->stop_done);

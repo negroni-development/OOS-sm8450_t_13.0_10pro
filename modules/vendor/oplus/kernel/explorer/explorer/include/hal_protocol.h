@@ -169,6 +169,12 @@ typedef enum {
 #define HAL_CMD_CAMERA   \
 	HAL_CMD_DEFINE(HAL_CH_0, 0x14)
 
+#ifdef SLT_ENABLE
+/* HAL cmd: slt */
+#define HAL_CMD_SLT      \
+	HAL_CMD_DEFINE(HAL_CH_0, 0x15)
+#endif
+
 /* HAL cmd: slt */
 #define HAL_CMD_DDR_DATA      \
 	HAL_CMD_DEFINE(HAL_CH_0, 0x16)
@@ -274,9 +280,16 @@ struct hal_comm_data {
   */
 #define	PBL_SUB_CMD_DFT		(0)	/* default */
 #define	PBL_SUB_CMD_TD		(2)	/* DDR tranining data */
+#ifdef SLT_ENABLE
+#define	PBL_SUB_CMD_SLT		(3)
+#endif
 
 #define	PBL_SUB_CMD_MB		(4)	/* mipi bypass */
 
+#ifdef SLT_ENABLE
+#define ID_2ND_RLD_SET		0x4U
+#define ID_2ND_RLD_CLR		0x5U
+#endif
 #define ID_DDRFW_RLD_SET	0x6U
 #define ID_DDRFW_RLD_CLR	0x7U
 #define ID_OS_RLD_SET		0x8U
@@ -285,12 +298,14 @@ struct hal_comm_data {
 #define ID_NPU_RLD_CLR		0xBU
 #define ID_ISP_RLD_SET		0xCU
 #define ID_ISP_RLD_CLR		0xDU
+#define ID_SLT_BEGIN		0x10U
 #define ID_PROV_DONE		0x11U
 #define ID_PBL_BEGIN		0x12U
 #define ID_MIPI_OK		0x13U
 #define ID_DDR_OK		0x14U
 #define ID_OS_OK		0x15U
 #define ID_NPU_OK		0x16U
+#define ID_SLT_RLD_CE	0x17U
 #define ID_DDR_FAIL		0x18U
 #define ID_PMIC_HW_OK		0x100U
 #define ID_PMIC_HW_ERR		0x101U

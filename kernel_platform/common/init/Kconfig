@@ -834,9 +834,14 @@ config UCLAMP_BUCKETS_COUNT
 	  If in doubt, use the default value.
 
 #ifdef OPLUS_FEATURE_PERFORMANCE_SCHED
-source "kernel/oplus_perf_sched/Kconfig"
+source "kernel/oplus_cpu/sched/Kconfig"
 source "kernel/sched/walt/tuning/Kconfig"
 #endif /* OPLUS_FEATURE_PERFORMANCE_SCHED */
+
+#ifdef OPLUS_FEATURE_THERMAL_HORAE
+source "kernel/oplus_cpu/thermal/Kconfig"
+#endif /* OPLUS_FEATURE_THERMAL_HORAE */
+
 endmenu
 
 #
@@ -1751,6 +1756,16 @@ config BPF_JIT_ALWAYS_ON
 config BPF_JIT_DEFAULT_ON
 	def_bool ARCH_WANT_DEFAULT_BPF_JIT || BPF_JIT_ALWAYS_ON
 	depends on HAVE_EBPF_JIT && BPF_JIT
+
+config BPF_UNPRIV_DEFAULT_OFF
+	bool "Disable unprivileged BPF by default"
+	depends on BPF_SYSCALL
+	help
+	  Disables unprivileged BPF by default by setting the corresponding
+	  /proc/sys/kernel/unprivileged_bpf_disabled knob to 2. An admin can
+	  still reenable it by setting it to 0 later on, or permanently
+	  disable it by setting it to 1 (from which no other transition to
+	  0 is possible anymore).
 
 source "kernel/bpf/preload/Kconfig"
 

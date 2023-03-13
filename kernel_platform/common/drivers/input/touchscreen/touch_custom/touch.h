@@ -1,12 +1,10 @@
 /***************************************************
  * File:touch.h
- * VENDOR_EDIT
  * Copyright (c)  2008- 2030  Oplus Mobile communication Corp.ltd.
  * Description:
  *             tp dev
  * Version:1.0:
  * Date created:2016/09/02
- * Author: Qicai.gu@Bsp.Driver
  * TAG: BSP.TP.Init
 */
 

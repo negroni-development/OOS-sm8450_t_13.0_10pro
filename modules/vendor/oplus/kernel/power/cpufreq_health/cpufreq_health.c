@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/vmalloc.h>
@@ -189,6 +190,7 @@ void cpufreq_health_get_edtask_state(int cpu, int edtask_flag)
 
 	first_cpu = cpumask_first(policy->related_cpus);
 	cluster_id = topology_physical_package_id(first_cpu);
+	cpufreq_cpu_put(policy);
 
 	if (cluster_id >= MAX_CLUSTERS)
 		return;
@@ -225,11 +227,10 @@ void cpufreq_health_get_edtask_state(int cpu, int edtask_flag)
 	}
 
 	if (now_edtask_flag == 1) {
-		if (och->pre_edtask_state == 1) {
+		if (och->pre_edtask_state == 1)
 			och->edtask_boost_time += delta;
-		} else {
+		else
 			och->edtask_count++;
-		}
 	}
 
 	if (now_edtask_flag == 0 && och->pre_edtask_state == 1) {
@@ -268,11 +269,10 @@ void cpufreq_health_get_newtask_state(struct cpufreq_policy *policy, int newtask
 	spin_lock_irqsave(&och->lock, flags);
 
 	if (newtask_flag == 1) {
-		if (och->pre_newtask_state == 1) {
+		if (och->pre_newtask_state == 1)
 			och->newtask_boost_time += delta;
-		} else {
+		else
 			och->newtask_count++;
-		}
 	}
 	if (newtask_flag == 0 && och->pre_newtask_state == 1) {
 		och->newtask_count++;
@@ -312,7 +312,6 @@ static int freq_table_get_closest_index(struct oplus_cpufreq_health *och, unsign
 		return best;
 	}
 	return best;
-
 }
 
 void cpufreq_health_get_state(struct cpufreq_policy *policy)
@@ -351,21 +350,21 @@ void cpufreq_health_get_state(struct cpufreq_policy *policy)
 	}
 
 	spin_lock_irqsave(&och->lock, flags);
-	//statistics floor
+	/*statistics floor*/
 	och->table[floor_idx].floor_time += delta;
 	if (policy->min != och->curr_floor_freq)
 		och->table[floor_idx].floor_count++;
 	och->prev_floor_freq = och->curr_floor_freq;
 	och->curr_floor_freq = policy->min;
 
-	//statistics ceiling
+	/*statistics ceiling*/
 	och->table[ceiling_idx].ceiling_time += delta;
 	if (policy->max != och->curr_ceiling_freq)
 		och->table[ceiling_idx].ceiling_count++;
 	och->prev_ceiling_freq = och->curr_ceiling_freq;
 	och->curr_ceiling_freq = policy->max;
 
-	//updat last_update_time
+	/*updat last_update_time*/
 	och->last_update_time = now;
 	spin_unlock_irqrestore(&och->lock, flags);
 	pr_debug("cluster = %d freq = %d  %d, delta = %lld\n",
@@ -439,7 +438,7 @@ static int cluster_init(int first_cpu, struct device *dev)
 			(int)cpumask_bits(policy->related_cpus)[0]);
 
 	och = &oplus_cpufreq_health[cluster_id];
-	//how many freq entry
+	/*how many freq entry*/
 	cpufreq_for_each_valid_entry_idx(pos, policy->freq_table, idx);
 	och->len = idx;
 
@@ -464,9 +463,8 @@ static int cluster_init(int first_cpu, struct device *dev)
 		return -ENOMEM;
 	}
 
-	for (index = 0; index < och->cpu_count; index++) {
+	for (index = 0; index < och->cpu_count; index++)
 		och->edtask_table[index].edtask_state = 0;
-	}
 
 	cpufreq_for_each_valid_entry_idx(pos, policy->freq_table, idx) {
 		if (idx > och->len)
@@ -510,7 +508,6 @@ static int horae_cpu_stats_init(int first_cpu, struct device *cpu_dev)
 	policy = cpufreq_cpu_get(first_cpu);
 	freq_table = policy->freq_table;
 
-	spin_lock_irqsave(&och->lock, flags);
 	cpufreq_for_each_valid_entry(pos, freq_table) {
 		idx = freq_table_get_closest_index(och, pos->frequency);
 		freq = pos->frequency * 1000;
@@ -524,11 +521,15 @@ static int horae_cpu_stats_init(int first_cpu, struct device *cpu_dev)
 		if (!mV)
 			goto out;
 
+		spin_lock_irqsave(&och->lock, flags);
+
 		och->table[idx].voltage = mV;
+
+		spin_unlock_irqrestore(&och->lock, flags);
+
 		pr_info("freq = %ld, voltage = %ld\n", freq, mV);
 	}
 out:
-	spin_unlock_irqrestore(&och->lock, flags);
 	cpufreq_cpu_put(policy);
 
 	return 0;

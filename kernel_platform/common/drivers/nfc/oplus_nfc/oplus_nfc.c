@@ -44,7 +44,7 @@ bool is_support_chip(chip_type chip)
 			target_chipset = "NQ330";
 			break;
 		case SN100T:
-			target_chipset = "SN100T";
+			target_chipset = "SN100T|SN110T";
 			break;
 		case SN100F:
 			target_chipset = "SN100F";
@@ -63,8 +63,7 @@ bool is_support_chip(chip_type chip)
 			break;
 	}
 
-	if (strcmp(target_chipset, current_chipset) == 0)
-	{
+	if (strstr(target_chipset, current_chipset) != NULL) {
 		ret = true;
 	}
 
@@ -124,7 +123,7 @@ static int oplus_nfc_probe(struct platform_device *pdev)
 	if (project > 0x10000) {
 		sprintf(prop_name, "chipset-%X", project);
 	} else {
-		sprintf(prop_name, "chipset-%d", project);
+		sprintf(prop_name, "chipset-%u", project);
 	}
 	pr_err("%s, prop to be read = %s", __func__, prop_name);
 	np = dev->of_node;

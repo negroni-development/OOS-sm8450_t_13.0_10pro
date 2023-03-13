@@ -153,6 +153,18 @@ int i2c_read(struct nfc_dev *nfc_dev, char *buf, size_t count, int timeout)
 				ret = -EIO;
 				goto err;
 			}
+			/*
+			 * NFC service wanted to close the driver so,
+			 * release the calling reader thread asap.
+			 *
+			 * This can happen in case of nfc node close call from
+			 * eSE HAL in that case the NFC HAL reader thread
+			 * will again call read system call
+			 */
+			if (nfc_dev->release_read) {
+				pr_debug("%s: releasing read\n", __func__);
+				return 0;
+			}
 			pr_warn("%s: spurious interrupt detected\n", __func__);
 		}
 	}
@@ -192,19 +204,6 @@ err:
 	return ret;
 }
 
-#ifdef OPLUS_BUG_STABILITY
-int cmdcmp(const char *tmp1, const char *tmp2, size_t count)
-{
-	int i;
-	for (i = 0; i < count; i++) {
-		if (tmp1[i] != tmp2[i]) {
-			return -1;
-		}
-	}
-	return 0;
-}
-#endif
-
 int i2c_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 	      int max_retry_cnt)
 {
@@ -214,45 +213,17 @@ int i2c_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 	uint16_t disp_len = GET_IPCLOG_MAX_PKT_LEN(count);
 
 	#ifdef OPLUS_BUG_STABILITY
-        int retrycount = 0;
-	char *wakeup_cmd = NULL;
-	const char on_unlocked[] = {0x20, 0x09, 0x01, 0x00};
-	const char on_locked[] = {0x20, 0x09, 0x01, 0x02};
-	const char off_locked[] = {0x20, 0x09, 0x01, 0x03};
-	const char polling_disabled[] = {0x20, 0x02, 0x04, 0x01, 0x02, 0x01, 0x00};
-	const char deactivate[] = {0x21, 0x06, 0x01, 0x00};
-	if (cmdcmp(buf, on_unlocked, sizeof(on_unlocked)) == 0
-		||cmdcmp(buf, on_locked, sizeof(on_locked)) == 0
-		||cmdcmp(buf, off_locked, sizeof(off_locked)) == 0
-		||cmdcmp(buf, deactivate, sizeof(deactivate)) == 0
-		||cmdcmp(buf, polling_disabled, sizeof(polling_disabled)) == 0) {
-		wakeup_cmd = kzalloc(NCI_GET_FW_CMD_LEN + 1, GFP_KERNEL);
-		if (!wakeup_cmd) {
-		    pr_err("%s: kzalloc wakeup_cmd failed\n",__func__);
-		    ret = -ENOMEM;
-		    goto out_free;
+	int retrycount = 0;
+	char wakeup_cmd[1] = {0};
+	while (++retrycount < 6) {
+		ret = i2c_master_send(nfc_dev->i2c_dev.client, wakeup_cmd, 1);
+		if (ret >= 0) {
+			break;
 		}
-
-		wakeup_cmd[0] = 0x00;
-
-		ret = i2c_master_send(nfc_dev->i2c_dev.client, wakeup_cmd, NCI_GET_FW_CMD_LEN);
-		usleep_range(1000, 1100);
-		if (ret < 0) {
-		    pr_err("%s: failed to write wakeup_cmd \n", __func__);
-                   /*wake up cmd maybe not write successfully, retry to wake up*/
-		    while (retrycount++ < MAX_RETRY_COUNT) {
-		        ret = i2c_master_send(nfc_dev->i2c_dev.client, wakeup_cmd, NCI_GET_FW_CMD_LEN);
-		        if (ret >= 0) {
-                            pr_err("%s: succeed to write wakeup_cmd\n", __func__);
-		            break;
-		        } else {
-                            pr_err("%s: failed to write wakeup_cmd %d, retry for %d times\n", __func__, ret, retrycount);
-		        }
-                        usleep_range(1000, 1100);
-                     }
-		} else {
-		     pr_err("%s: succeed to write wakeup_cmd\n", __func__);
-		}
+		usleep_range(5000, 5100);
+	}
+	if (ret < 0) {
+		pr_err("%s: failed to write wakeup_cmd : %d, retry for : %d times\n", __func__, ret, retrycount);
 	}
 	#endif
 
@@ -282,12 +253,6 @@ int i2c_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 			break;
 	}
 
-#ifdef OPLUS_BUG_STABILITY
-out_free:
-	if (wakeup_cmd != NULL) {
-	    kfree(wakeup_cmd);
-	}
-#endif
 	return ret;
 }
 
@@ -297,12 +262,17 @@ ssize_t nfc_i2c_dev_read(struct file *filp, char __user *buf,
 	int ret = 0;
 	struct nfc_dev *nfc_dev = (struct nfc_dev *)filp->private_data;
 
-	if (filp->f_flags & O_NONBLOCK) {
-		pr_err(":f_flag has O_NONBLOCK. EAGAIN\n");
-		return -EAGAIN;
+	if (!nfc_dev) {
+		pr_err("%s: device doesn't exist anymore\n", __func__);
+		return -ENODEV;
 	}
 	mutex_lock(&nfc_dev->read_mutex);
-	ret = i2c_read(nfc_dev, nfc_dev->read_kbuf, count, 0);
+	if (filp->f_flags & O_NONBLOCK) {
+		ret = i2c_master_recv(nfc_dev->i2c_dev.client, nfc_dev->read_kbuf, count);
+		pr_debug("%s: NONBLOCK read ret = %d\n", __func__, ret);
+	} else {
+		ret = i2c_read(nfc_dev, nfc_dev->read_kbuf, count, 0);
+	}
 	if (ret > 0) {
 		if (copy_to_user(buf, nfc_dev->read_kbuf, ret)) {
 			pr_warn("%s : failed to copy to user space\n", __func__);
@@ -322,8 +292,10 @@ ssize_t nfc_i2c_dev_write(struct file *filp, const char __user *buf,
 	if (count > MAX_DL_BUFFER_SIZE)
 		count = MAX_DL_BUFFER_SIZE;
 
-	if (!nfc_dev)
+	if (!nfc_dev) {
+		pr_err("%s: device doesn't exist anymore\n", __func__);
 		return -ENODEV;
+	}
 
 	mutex_lock(&nfc_dev->write_mutex);
 	if (copy_from_user(nfc_dev->write_kbuf, buf, count)) {
@@ -342,6 +314,7 @@ static const struct file_operations nfc_i2c_dev_fops = {
 	.read = nfc_i2c_dev_read,
 	.write = nfc_i2c_dev_write,
 	.open = nfc_dev_open,
+	.flush = nfc_dev_flush,
 	.release = nfc_dev_close,
 	.unlocked_ioctl = nfc_dev_ioctl,
 };

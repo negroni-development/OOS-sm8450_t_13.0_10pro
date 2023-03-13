@@ -19,7 +19,6 @@
 #include	"FromCode_01_02_01_00.h"
 #include	"FromCode_01_02_02_01.h"
 #include	"FromCode_01_02_03_02.h" //for 128 + bim260
-#include    "FromCode_02_01_00_00.h" //for 128 support IMCs4x6xx & lsm6dsmo
 
 /* Burst Length for updating to PMEM */
 #define BURST_LENGTH_UC 		( 3*20 ) 	// 60 Total:63Byte Burst
@@ -60,7 +59,7 @@ UINT_32	FW_info[][3] =
 
 
 const DOWNLOAD_TBL_EXT DTbl[] = {
-	{0x060100, 1, CcUpdataCode128_02_01_00_00, UpDataCodeSize_02_01_00_00,  UpDataCodeCheckSum_02_01_00_00, CcFromCode128_02_01_00_00, sizeof(CcFromCode128_02_01_00_00), FromCheckSum_02_01_00_00, FromCheckSumSize_02_01_00_00 },
+	{0x060100, 1, CcUpdataCode128_01_00_00,    UpDataCodeSize_01_00_00,     UpDataCodeCheckSum_01_00_00,    CcFromCode128_01_00_00,    sizeof(CcFromCode128_01_00_00),    FromCheckSum_01_00_00,    FromCheckSumSize_01_00_00    },
 	{0x010100, 1, CcUpdataCode128_01_02_01_00, UpDataCodeSize_01_02_01_00,  UpDataCodeCheckSum_01_02_01_00, CcFromCode128_01_02_01_00, sizeof(CcFromCode128_01_02_01_00), FromCheckSum_01_02_01_00, FromCheckSumSize_01_02_01_00 },
 	{0x010201, 1, CcUpdataCode128_01_02_02_01, UpDataCodeSize_01_02_02_01,  UpDataCodeCheckSum_01_02_02_01, CcFromCode128_01_02_02_01, sizeof(CcFromCode128_01_02_02_01), FromCheckSum_01_02_02_01, FromCheckSumSize_01_02_02_01 },
 	{0x010100, 1, CcUpdataCode128_01_02_03_02, UpDataCodeSize_01_02_03_02,  UpDataCodeCheckSum_01_02_03_02, CcFromCode128_01_02_03_02, sizeof(CcFromCode128_01_02_03_02), FromCheckSum_01_02_03_02, FromCheckSumSize_01_02_03_02 },

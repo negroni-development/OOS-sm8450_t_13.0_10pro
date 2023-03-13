@@ -18,7 +18,6 @@
 
 #include "dsi_panel.h"
 #include "dsi_defs.h"
-#include "oplus_display_panel_hbm.h"
 
 #define PANEL_MAX_NOMAL_BRIGHTNESS 2047
 
@@ -172,5 +171,6 @@ static int backlight_600_800nit_buf[] = {
 int oplus_display_panel_backlight_mapping(struct dsi_panel *panel, u32 *backlight_level);
 int oplus_display_panel_get_global_hbm_status(void);
 void oplus_display_panel_set_global_hbm_status(int global_hbm_status);
+int oplus_panel_parse_bl_config(struct dsi_panel *panel);
 
 #endif
